@@ -17,6 +17,40 @@
 
     <div id="toast" hidden></div>
 
+    <div id="diary-modal" class="diary-modal" hidden inert>
+      <div class="diary-backdrop" data-diary="backdrop"></div>
+      <section class="diary-paper" role="dialog" aria-modal="true" aria-labelledby="diary-label">
+        <button type="button" class="diary-x" data-diary="close" aria-label="關閉">×</button>
+        <h2 id="diary-label">日記</h2>
+        <p class="diary-date" id="diary-date"></p>
+
+        <div class="diary-row">
+          <span class="diary-kicker">心情</span>
+          <div class="diary-moods" role="group" aria-label="心情">
+            <button type="button" class="diary-mood" data-mood="happy" aria-pressed="false">開心</button>
+            <button type="button" class="diary-mood" data-mood="calm" aria-pressed="true">平靜</button>
+            <button type="button" class="diary-mood" data-mood="down" aria-pressed="false">低落</button>
+            <button type="button" class="diary-mood" data-mood="hope" aria-pressed="false">期待</button>
+          </div>
+        </div>
+
+        <label class="diary-field">
+          <span class="diary-kicker">標題</span>
+          <input id="diary-heading" maxlength="40" placeholder="今天想記下什麼…" autocomplete="off" />
+        </label>
+
+        <label class="diary-field diary-field-body">
+          <span class="diary-kicker">內文</span>
+          <textarea id="diary-body" rows="7" placeholder="把這一頁慢慢寫完。"></textarea>
+        </label>
+
+        <div class="diary-actions">
+          <button type="button" class="diary-btn diary-btn-save" id="diary-save" data-diary="save">儲存</button>
+          <button type="button" class="diary-btn" data-diary="close">關閉</button>
+        </div>
+      </section>
+    </div>
+
     <div id="touch-ui" hidden>
       <div class="dpad" id="dpad" aria-label="方向鍵">
         <span class="cell empty"></span>

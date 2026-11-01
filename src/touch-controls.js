@@ -34,6 +34,13 @@ export function consumeAction() {
   return pressed;
 }
 
+export function setTouchInputLocked(locked) {
+  clearDirs();
+  touchInput.actionPressed = false;
+  updateDpadVisual();
+  document.getElementById("touch-ui")?.classList.toggle("locked", Boolean(locked));
+}
+
 export function setInteractHint(on) {
   const btn = document.getElementById("btn-a");
   if (!btn) {

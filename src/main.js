@@ -5,9 +5,11 @@ import {
   initTouchControls,
   isTouchPreferred,
   setInteractHint,
+  setTouchInputLocked,
   showToast,
   touchInput,
 } from "./touch-controls.js";
+import { initDiary, isGamePaused, onDiaryPause, openDiary } from "./diary.js";
 
 const ROOM_TILES = 16;
 const GAME_SIZE = TILE * ROOM_TILES;
@@ -29,14 +31,15 @@ const k = kaplay({
   texFilter: "nearest",
   background: [18, 14, 22],
   font: "monospace",
+  debug: false,
   root: document.querySelector("#game-root"),
 });
 
-const INTERACT_GAP = 24;
+const INTERACT_GAP = 28;
 
 k.setBackground(18, 14, 22);
 k.setGravity(0);
-k.debug.inspect = true;
+k.debug.inspect = false;
 k.debug.showLog = false;
 
 k.loadSprite("goose", "/assets/goose.png", { singular: true });
@@ -75,7 +78,7 @@ function addBlock(x, y, w, h) {
   ]);
 }
 
-function addSolid(name, x, y, hit, prompt) {
+function addSolid(name, x, y, hit, prompt, kind) {
   const bottom = y + hit.y + hit.h;
   const comps = [
     k.sprite(name),
@@ -97,6 +100,9 @@ function addSolid(name, x, y, hit, prompt) {
   if (prompt) {
     obj.prompt = prompt;
   }
+  if (kind) {
+    obj.kind = kind;
+  }
   return obj;
 }
 
@@ -111,32 +117,18 @@ function gapToHit(player, obj, hitX) {
 }
 
 function nearestInteract(player, hitX) {
-  let best = null;
-  let bestGap = INTERACT_GAP;
+  const found = [];
 
   for (const obj of k.get("interact")) {
     const gap = gapToHit(player, obj, hitX);
-    if (gap <= bestGap) {
-      best = obj;
-      bestGap = gap;
+    const limit = obj.kind === "diary" ? 40 : INTERACT_GAP;
+    if (gap <= limit) {
+      found.push({ obj, gap, diary: obj.kind === "diary" });
     }
   }
 
-  return best;
-}
-
-function drawAreaOutline(obj, color) {
-  if (typeof obj.worldArea !== "function") {
-    return;
-  }
-
-  const poly = obj.worldArea();
-  k.drawPolygon({
-    pts: poly.pts,
-    fill: false,
-    outline: { width: 1, color },
-    opacity: 1,
-  });
+  found.sort((a, b) => Number(b.diary) - Number(a.diary) || a.gap - b.gap);
+  return found[0]?.obj ?? null;
 }
 
 k.scene("room", () => {
@@ -189,13 +181,20 @@ k.scene("room", () => {
   addSolid("cabinet", 16, 10, { x: 8, y: 54, w: 32, h: 18 }, "衣櫃裡疊著換季的衣服。");
   addSolid("bookcase", 192, 24, { x: 2, y: 28, w: 28, h: 10 }, "書櫃上排滿舊筆記與繪本。");
 
-  addSolid("palm", 22, 174, { x: 3, y: 24, w: 13, h: 8 }, "盆栽的葉子摸起來涼涼的。");
-  addSolid("bush", 204, 175, { x: 6, y: 24, w: 12, h: 8 }, "這叢綠意把角落填得很滿。");
-  addSolid("bush", 68, 33, { x: 6, y: 24, w: 12, h: 8 }, "這叢綠意把角落填得很滿。");
-  addSolid("palm", 148, 68, { x: 3, y: 24, w: 13, h: 8 }, "盆栽的葉子摸起來涼涼的。");
-  addSolid("bush", 112, 195, { x: 6, y: 24, w: 12, h: 8 }, "這叢綠意把角落填得很滿。");
+  addSolid("palm", 22, 174, { x: 3, y: 24, w: 13, h: 8 });
+  addSolid("bush", 204, 175, { x: 6, y: 24, w: 12, h: 8 });
+  addSolid("bush", 68, 33, { x: 6, y: 24, w: 12, h: 8 });
+  addSolid("palm", 148, 68, { x: 3, y: 24, w: 13, h: 8 });
+  addSolid("bush", 112, 195, { x: 6, y: 24, w: 12, h: 8 });
 
-  addSolid("desk", 22, 104, { x: 1, y: 13, w: 26, h: 8 }, "桌上攤著筆記本，旁邊擱了一支筆。");
+  addSolid(
+    "desk",
+    22,
+    104,
+    { x: 1, y: 13, w: 26, h: 8 },
+    "打開桌上的日記。",
+    "diary",
+  );
 
   addSolid("record-player", 184, 118, { x: 2, y: 19, w: 20, h: 8 }, "唱片機輕輕轉了一下，發出沙沙聲。");
 
@@ -221,9 +220,16 @@ k.scene("room", () => {
   let facing = "down";
 
   const tryInteract = () => {
+    if (isGamePaused()) {
+      return;
+    }
     const hitX = gooseHitX(goose.flipX);
     const target = nearestInteract(player, hitX);
     if (!target) {
+      return;
+    }
+    if (target.kind === "diary") {
+      openDiary();
       return;
     }
     showToast(target.prompt);
@@ -233,10 +239,14 @@ k.scene("room", () => {
   k.onKeyPress("space", tryInteract);
 
   const onWindowInteract = (event) => {
-    if (event.repeat) {
+    if (event.repeat || isGamePaused()) {
+      return;
+    }
+    if (event.target?.closest?.("#diary-modal")) {
       return;
     }
     if (event.code === "KeyE" || event.code === "Space") {
+      event.preventDefault();
       tryInteract();
     }
   };
@@ -245,7 +255,20 @@ k.scene("room", () => {
     window.removeEventListener("keydown", onWindowInteract);
   });
 
+  onDiaryPause((locked) => {
+    setTouchInputLocked(locked);
+    player.vel = k.vec2(0, 0);
+  });
+
   k.onUpdate(() => {
+    if (isGamePaused()) {
+      player.vel = k.vec2(0, 0);
+      goose.pos.y = -4;
+      consumeAction();
+      snapCam();
+      return;
+    }
+
     const dir = k.vec2(0, 0);
 
     if (k.isKeyDown("left") || k.isKeyDown("a") || touchInput.left) dir.x -= 1;
@@ -298,18 +321,6 @@ k.scene("room", () => {
     snapCam();
   });
 
-  k.onDraw(() => {
-    for (const obj of k.get("wall")) {
-      drawAreaOutline(obj, k.rgb(80, 170, 255));
-    }
-    for (const obj of k.get("solid")) {
-      drawAreaOutline(obj, k.rgb(40, 230, 90));
-    }
-    for (const obj of k.get("player")) {
-      drawAreaOutline(obj, k.rgb(255, 60, 70));
-    }
-  });
-
   k.add([
     k.text(
       isTouchPreferred() ? "虛擬方向鍵移動  ·  A 互動" : "WASD / ARROWS  ·  E / SPACE 互動",
@@ -324,6 +335,7 @@ k.scene("room", () => {
 });
 
 initTouchControls();
+initDiary();
 
 k.onLoad(() => {
   k.go("room");

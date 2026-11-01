@@ -1,0 +1,220 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: #120e16;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-root {
+  position: relative;
+  width: min(100vw, 100dvh);
+  height: min(100vw, 100dvh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-root canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+#toast {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(88vw, 320px);
+  padding: 8px 12px;
+  background: #1b1522;
+  color: #f4ead2;
+  border: 3px solid #e8c37a;
+  box-shadow: 0 0 0 2px #3a2a1c;
+  font: 12px/1.4 ui-monospace, "Cascadia Mono", monospace;
+  text-align: center;
+  pointer-events: none;
+}
+
+#touch-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+#touch-ui[hidden] {
+  display: none;
+}
+
+.dpad {
+  position: absolute;
+  left: calc(16px + env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 168px;
+  height: 168px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 4px;
+  pointer-events: auto;
+  opacity: 0.78;
+}
+
+.cell {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+
+.cell.dir {
+  position: relative;
+  background: #2a211c;
+  border: 3px solid #d7c4a0;
+  box-shadow:
+    inset 0 0 0 2px #5a4634,
+    0 4px 0 #1a1210;
+  pointer-events: auto;
+}
+
+.cell.dir:active,
+.cell.dir.held {
+  background: #4a382c;
+  box-shadow:
+    inset 0 0 0 2px #e8c37a,
+    0 2px 0 #1a1210;
+  transform: translateY(2px);
+}
+
+.cell.dir::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.cell.dir[data-dir="up"]::after {
+  border-width: 0 9px 12px 9px;
+  border-color: transparent transparent #f4ead2 transparent;
+}
+
+.cell.dir[data-dir="down"]::after {
+  border-width: 12px 9px 0 9px;
+  border-color: #f4ead2 transparent transparent transparent;
+}
+
+.cell.dir[data-dir="left"]::after {
+  border-width: 9px 12px 9px 0;
+  border-color: transparent #f4ead2 transparent transparent;
+}
+
+.cell.dir[data-dir="right"]::after {
+  border-width: 9px 0 9px 12px;
+  border-color: transparent transparent transparent #f4ead2;
+}
+
+.cell.nub {
+  background: #3a2e26;
+  border: 3px solid #8a6f52;
+  box-shadow: inset 0 0 0 2px #1a1210;
+}
+
+.btn-a {
+  position: absolute;
+  right: calc(22px + env(safe-area-inset-right));
+  bottom: calc(36px + env(safe-area-inset-bottom));
+  width: 76px;
+  height: 76px;
+  pointer-events: auto;
+  border: 0;
+  background: transparent;
+  opacity: 0.72;
+}
+
+.btn-a-face {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: #6e3b3b;
+  color: #f4ead2;
+  border: 3px solid #f0d2a8;
+  box-shadow:
+    inset 0 0 0 3px #3a1c1c,
+    0 5px 0 #2a1212;
+  clip-path: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0 calc(100% - 10px),
+    0 10px
+  );
+  font: 700 28px/1 ui-monospace, "Cascadia Mono", monospace;
+}
+
+.btn-a:active .btn-a-face,
+.btn-a.held .btn-a-face {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 0 0 3px #3a1c1c,
+    0 2px 0 #2a1212;
+}
+
+.btn-a.hint {
+  opacity: 1;
+  animation: interact-bounce 0.55s ease-in-out infinite;
+}
+
+.btn-a.hint .btn-a-face {
+  background: #b24a3c;
+  border-color: #ffe08a;
+  box-shadow:
+    inset 0 0 0 3px #5a2018,
+    0 5px 0 #2a1212,
+    0 0 0 3px #ffe08a;
+}
+
+@keyframes interact-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@media (max-width: 420px) {
+  .dpad {
+    width: 148px;
+    height: 148px;
+  }
+
+  .btn-a {
+    width: 68px;
+    height: 68px;
+  }
+}

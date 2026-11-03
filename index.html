@@ -22,31 +22,32 @@
       <section class="diary-paper" role="dialog" aria-modal="true" aria-labelledby="diary-label">
         <button type="button" class="diary-x" data-diary="close" aria-label="關閉">×</button>
         <h2 id="diary-label">日記</h2>
-        <p class="diary-date" id="diary-date"></p>
 
-        <div class="diary-row">
-          <span class="diary-kicker">心情</span>
-          <div class="diary-moods" role="group" aria-label="心情">
-            <button type="button" class="diary-mood" data-mood="happy" aria-pressed="false">開心</button>
-            <button type="button" class="diary-mood" data-mood="calm" aria-pressed="true">平靜</button>
-            <button type="button" class="diary-mood" data-mood="down" aria-pressed="false">低落</button>
-            <button type="button" class="diary-mood" data-mood="hope" aria-pressed="false">期待</button>
-          </div>
+        <div id="diary-list-view">
+          <button type="button" class="diary-btn diary-btn-save diary-new" data-diary="new">
+            寫新的一頁
+          </button>
+          <p id="diary-empty" class="diary-empty">還沒有寫過日記。先開一頁空白吧。</p>
+          <div id="diary-list" class="diary-list"></div>
         </div>
 
-        <label class="diary-field">
-          <span class="diary-kicker">標題</span>
-          <input id="diary-heading" maxlength="40" placeholder="今天想記下什麼…" autocomplete="off" />
-        </label>
+        <div id="diary-edit-view" hidden>
+          <p class="diary-date" id="diary-date"></p>
 
-        <label class="diary-field diary-field-body">
-          <span class="diary-kicker">內文</span>
-          <textarea id="diary-body" rows="7" placeholder="把這一頁慢慢寫完。"></textarea>
-        </label>
+          <label class="diary-field">
+            <span class="diary-kicker">標題</span>
+            <input id="diary-heading" maxlength="40" placeholder="今天想記下什麼…" autocomplete="off" />
+          </label>
 
-        <div class="diary-actions">
-          <button type="button" class="diary-btn diary-btn-save" id="diary-save" data-diary="save">儲存</button>
-          <button type="button" class="diary-btn" data-diary="close">關閉</button>
+          <label class="diary-field diary-field-body">
+            <span class="diary-kicker">內文</span>
+            <textarea id="diary-body" rows="7" placeholder="把這一頁慢慢寫完。"></textarea>
+          </label>
+
+          <div class="diary-actions">
+            <button type="button" class="diary-btn diary-btn-save" id="diary-save" data-diary="save">儲存</button>
+            <button type="button" class="diary-btn" data-diary="back">返回清單</button>
+          </div>
         </div>
       </section>
     </div>

@@ -304,6 +304,28 @@ body.diary-open {
   margin: 18px 0;
 }
 
+.diary-status {
+  text-align: center;
+  color: #7a4e2e;
+  margin: 0 0 10px;
+}
+
+.diary-status[data-kind="error"] {
+  color: #8a2a22;
+}
+
+.diary-paper.is-busy .diary-item,
+.diary-paper.is-busy .diary-new,
+.diary-paper.is-busy .diary-btn-save {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.diary-paper input:disabled,
+.diary-paper textarea:disabled {
+  opacity: 0.7;
+}
+
 .diary-list {
   display: grid;
   gap: 8px;

@@ -1,9 +1,13 @@
-const STORAGE_KEY = "pixel-room-diary";
+import { supabase } from "./supabase.js";
 
 let paused = false;
 let onPauseChange = () => {};
 let closeTimer = 0;
 let editingId = null;
+let loading = false;
+let saving = false;
+let listRequest = 0;
+let cachedEntries = [];
 
 export function isGamePaused() {
   return paused;
@@ -22,37 +26,6 @@ function todayLabel() {
   });
 }
 
-function newId() {
-  if (globalThis.crypto?.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `entry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function loadEntries() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (Array.isArray(raw)) {
-      return raw.map(normalizeEntry).filter(Boolean);
-    }
-    if (raw && typeof raw === "object") {
-      const migrated = normalizeEntry({
-        id: newId(),
-        date: raw.date,
-        title: raw.title,
-        content: raw.content || raw.body,
-        mood: raw.mood,
-      });
-      const list = migrated ? [migrated] : [];
-      saveEntries(list);
-      return list;
-    }
-  } catch {
-    return [];
-  }
-  return [];
-}
-
 function normalizeEntry(entry) {
   if (!entry || typeof entry !== "object") {
     return null;
@@ -60,15 +33,11 @@ function normalizeEntry(entry) {
   const title = String(entry.title || "").trim();
   const content = String(entry.content || entry.body || "");
   const date = String(entry.date || todayLabel());
-  const id = String(entry.id || newId());
+  const id = String(entry.id || "");
+  if (!id) {
+    return null;
+  }
   return { id, date, title, content };
-}
-
-function saveEntries(entries) {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(entries.map(({ id, date, title, content }) => ({ id, date, title, content }))),
-  );
 }
 
 function setPaused(next) {
@@ -80,6 +49,8 @@ function setPaused(next) {
 function els() {
   return {
     modal: document.getElementById("diary-modal"),
+    paper: document.querySelector(".diary-paper"),
+    status: document.getElementById("diary-status"),
     listView: document.getElementById("diary-list-view"),
     editView: document.getElementById("diary-edit-view"),
     list: document.getElementById("diary-list"),
@@ -90,6 +61,43 @@ function els() {
     save: document.getElementById("diary-save"),
     heading: document.getElementById("diary-label"),
   };
+}
+
+function isBusy() {
+  return loading || saving;
+}
+
+function setStatus(message, kind = "info") {
+  const { status } = els();
+  if (!status) {
+    return;
+  }
+  if (!message) {
+    status.hidden = true;
+    status.textContent = "";
+    status.removeAttribute("data-kind");
+    return;
+  }
+  status.hidden = false;
+  status.textContent = message;
+  status.dataset.kind = kind;
+}
+
+function setBusy(nextLoading, nextSaving) {
+  loading = nextLoading;
+  saving = nextSaving;
+  const { paper, title, body, save } = els();
+  paper?.classList.toggle("is-busy", isBusy());
+  const freeze = isBusy();
+  if (title) {
+    title.disabled = freeze;
+  }
+  if (body) {
+    body.disabled = freeze;
+  }
+  if (save) {
+    save.disabled = freeze;
+  }
 }
 
 function showView(name) {
@@ -108,11 +116,11 @@ function previewText(content) {
   return text.length > 36 ? `${text.slice(0, 36)}…` : text;
 }
 
-function renderList() {
+function renderList(entries, options = {}) {
   const { list, empty } = els();
-  const entries = loadEntries();
+  cachedEntries = entries;
   list.replaceChildren();
-  empty.hidden = entries.length > 0;
+  empty.hidden = Boolean(options.failed) || loading || entries.length > 0;
 
   for (const entry of entries) {
     const item = document.createElement("button");
@@ -138,6 +146,34 @@ function renderList() {
   }
 }
 
+async function fetchEntries() {
+  const requestId = ++listRequest;
+  setBusy(true, saving);
+  setStatus("載入中…");
+
+  const { data, error } = await supabase
+    .from("diaries")
+    .select("id, created_at, date, title, content")
+    .order("created_at", { ascending: false });
+
+  if (requestId !== listRequest) {
+    return cachedEntries;
+  }
+
+  if (error) {
+    setBusy(false, saving);
+    setStatus("讀取失敗，請稍後再試。", "error");
+    renderList([], { failed: true });
+    return [];
+  }
+
+  const entries = (data || []).map(normalizeEntry).filter(Boolean);
+  setBusy(false, saving);
+  setStatus("");
+  renderList(entries);
+  return entries;
+}
+
 function fillForm(entry) {
   const { date, title, body } = els();
   date.textContent = entry?.date || todayLabel();
@@ -146,10 +182,19 @@ function fillForm(entry) {
 }
 
 function openEditor(entry) {
+  if (isBusy()) {
+    return;
+  }
   editingId = entry?.id || null;
   fillForm(entry);
   showView("edit");
   els().title?.focus();
+}
+
+async function showList() {
+  editingId = null;
+  showView("list");
+  await fetchEntries();
 }
 
 export function openDiary() {
@@ -160,7 +205,7 @@ export function openDiary() {
 
   clearTimeout(closeTimer);
   editingId = null;
-  renderList();
+  renderList([]);
   showView("list");
   modal.hidden = false;
   modal.inert = false;
@@ -168,14 +213,18 @@ export function openDiary() {
     modal.classList.add("open");
   });
   setPaused(true);
+  void fetchEntries();
 }
 
 export function closeDiary() {
   const { modal } = els();
-  if (!modal || modal.hidden) {
+  if (!modal || modal.hidden || saving) {
     return;
   }
 
+  listRequest += 1;
+  loading = false;
+  setBusy(false, false);
   modal.classList.remove("open");
   modal.inert = true;
   setPaused(false);
@@ -184,27 +233,46 @@ export function closeDiary() {
   }, 240);
 }
 
-function persist() {
+async function persist() {
   const { title, body, save } = els();
-  const entries = loadEntries();
-  const next = {
-    id: editingId || newId(),
+  if (isBusy() || !title || !body || !save) {
+    return;
+  }
+
+  setBusy(false, true);
+  save.textContent = "儲存中…";
+  setStatus("儲存中…");
+
+  const payload = {
     date: editingId
-      ? entries.find((entry) => entry.id === editingId)?.date || todayLabel()
+      ? cachedEntries.find((entry) => entry.id === editingId)?.date || todayLabel()
       : todayLabel(),
     title: title.value.trim(),
     content: body.value,
   };
 
-  const index = entries.findIndex((entry) => entry.id === next.id);
-  if (index >= 0) {
-    entries[index] = next;
-  } else {
-    entries.unshift(next);
-    editingId = next.id;
+  const query = editingId
+    ? supabase.from("diaries").update(payload).eq("id", editingId).select("id, date, title, content").single()
+    : supabase.from("diaries").insert(payload).select("id, date, title, content").single();
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    setBusy(false, false);
+    save.textContent = "儲存";
+    setStatus("儲存失敗，請稍後再試。", "error");
+    return;
   }
 
-  saveEntries(entries);
+  const saved = normalizeEntry(data);
+  if (saved) {
+    editingId = saved.id;
+    const others = cachedEntries.filter((entry) => entry.id !== saved.id);
+    cachedEntries = [saved, ...others];
+  }
+
+  setBusy(false, false);
+  setStatus("");
   save.textContent = "已儲存";
   clearTimeout(persist._timer);
   persist._timer = setTimeout(() => {
@@ -225,18 +293,22 @@ export function initDiary() {
       closeDiary();
     }
     if (action === "save") {
-      persist();
+      void persist();
     }
     if (action === "new") {
       openEditor(null);
     }
     if (action === "back") {
-      editingId = null;
-      renderList();
-      showView("list");
+      if (isBusy()) {
+        return;
+      }
+      void showList();
     }
     if (action === "open-entry") {
-      const entry = loadEntries().find((item) => item.id === actionEl.dataset.id);
+      if (isBusy()) {
+        return;
+      }
+      const entry = cachedEntries.find((item) => item.id === actionEl.dataset.id);
       if (entry) {
         openEditor(entry);
       }
@@ -249,11 +321,12 @@ export function initDiary() {
     }
     if (event.code === "Escape") {
       event.preventDefault();
+      if (isBusy()) {
+        return;
+      }
       const { editView } = els();
       if (editView && !editView.hidden) {
-        editingId = null;
-        renderList();
-        showView("list");
+        void showList();
         return;
       }
       closeDiary();

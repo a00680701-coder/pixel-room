@@ -1,5 +1,6 @@
 -- 在 Supabase 後台：SQL Editor → New query → 貼上後 Run
 -- 建立日記表，並開放匿名讀寫（此專案尚未做登入）
+-- 若資料表已存在，再跑一次也安全；重點是 GRANT，沒有它 API 會 401 permission denied。
 
 create table if not exists public.diaries (
   id uuid primary key default gen_random_uuid(),
@@ -10,6 +11,9 @@ create table if not exists public.diaries (
 );
 
 alter table public.diaries enable row level security;
+
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.diaries to anon, authenticated;
 
 drop policy if exists "diaries_select_public" on public.diaries;
 drop policy if exists "diaries_insert_public" on public.diaries;

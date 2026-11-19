@@ -116,6 +116,28 @@ function previewText(content) {
   return text.length > 36 ? `${text.slice(0, 36)}…` : text;
 }
 
+function formatSupabaseError(error) {
+  if (!error) {
+    return "未知錯誤";
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  const parts = [
+    error.message,
+    error.code ? `code=${error.code}` : "",
+    error.details,
+    error.hint,
+  ].filter(Boolean);
+  return parts.join(" | ") || String(error);
+}
+
+function reportDiaryError(action, error) {
+  const detail = formatSupabaseError(error);
+  console.error(`[diary] ${action} failed`, error);
+  return detail;
+}
+
 function renderList(entries, options = {}) {
   const { list, empty } = els();
   cachedEntries = entries;
@@ -151,27 +173,37 @@ async function fetchEntries() {
   setBusy(true, saving);
   setStatus("載入中…");
 
-  const { data, error } = await supabase
-    .from("diaries")
-    .select("id, created_at, date, title, content")
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from("diaries")
+      .select("id, created_at, date, title, content")
+      .order("created_at", { ascending: false });
 
-  if (requestId !== listRequest) {
-    return cachedEntries;
-  }
+    if (requestId !== listRequest) {
+      return cachedEntries;
+    }
 
-  if (error) {
+    if (error) {
+      setBusy(false, saving);
+      setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
+      renderList([], { failed: true });
+      return [];
+    }
+
+    const entries = (data || []).map(normalizeEntry).filter(Boolean);
     setBusy(false, saving);
-    setStatus("讀取失敗，請稍後再試。", "error");
+    setStatus("");
+    renderList(entries);
+    return entries;
+  } catch (error) {
+    if (requestId !== listRequest) {
+      return cachedEntries;
+    }
+    setBusy(false, saving);
+    setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
     renderList([], { failed: true });
     return [];
   }
-
-  const entries = (data || []).map(normalizeEntry).filter(Boolean);
-  setBusy(false, saving);
-  setStatus("");
-  renderList(entries);
-  return entries;
 }
 
 function fillForm(entry) {
@@ -255,12 +287,18 @@ async function persist() {
     ? supabase.from("diaries").update(payload).eq("id", editingId).select("id, date, title, content").single()
     : supabase.from("diaries").insert(payload).select("id, date, title, content").single();
 
-  const { data, error } = await query;
+  let data;
+  let error;
+  try {
+    ({ data, error } = await query);
+  } catch (caught) {
+    error = caught;
+  }
 
   if (error || !data) {
     setBusy(false, false);
     save.textContent = "儲存";
-    setStatus("儲存失敗，請稍後再試。", "error");
+    setStatus(`儲存失敗：${reportDiaryError(editingId ? "update" : "insert", error || "沒有回傳資料")}`, "error");
     return;
   }
 

@@ -19,37 +19,33 @@
 
     <div id="diary-modal" class="diary-modal" hidden inert>
       <div class="diary-backdrop" data-diary="backdrop"></div>
-      <section class="diary-paper" role="dialog" aria-modal="true" aria-labelledby="diary-label">
+      <section class="diary-stage" role="dialog" aria-modal="true" aria-labelledby="diary-label">
+        <h2 id="diary-label" class="diary-sr">日記</h2>
         <button type="button" class="diary-x" data-diary="close" aria-label="關閉">×</button>
-        <h2 id="diary-label">日記</h2>
-        <p id="diary-status" class="diary-status" hidden>載入中…</p>
 
-        <div id="diary-list-view">
-          <button type="button" class="diary-btn diary-btn-save diary-new" data-diary="new">
-            寫新的一頁
-          </button>
-          <p id="diary-empty" class="diary-empty">還沒有寫過日記。先開一頁空白吧。</p>
-          <div id="diary-list" class="diary-list"></div>
-        </div>
+        <div class="diary-book-wrap">
+          <button type="button" class="diary-bookmark" data-diary="toc" aria-label="目錄" title="目錄"></button>
+          <button type="button" class="diary-nav" data-diary="prev" id="diary-prev" aria-label="上一頁">‹</button>
+          <button type="button" class="diary-nav" data-diary="next" id="diary-next" aria-label="下一頁">›</button>
 
-        <div id="diary-edit-view" hidden>
-          <p class="diary-date" id="diary-date"></p>
-
-          <label class="diary-field">
-            <span class="diary-kicker">標題</span>
-            <input id="diary-heading" maxlength="40" placeholder="今天想記下什麼…" autocomplete="off" />
-          </label>
-
-          <label class="diary-field diary-field-body">
-            <span class="diary-kicker">內文</span>
-            <textarea id="diary-body" rows="7" placeholder="把這一頁慢慢寫完。"></textarea>
-          </label>
-
-          <div class="diary-actions">
-            <button type="button" class="diary-btn diary-btn-save" id="diary-save" data-diary="save">儲存</button>
-            <button type="button" class="diary-btn" data-diary="back">返回清單</button>
+          <div class="diary-book" id="diary-book">
+            <div class="diary-page diary-page-left">
+              <p class="diary-page-head" id="diary-left-head"></p>
+              <textarea id="diary-left" class="diary-lines" rows="12" spellcheck="false" autocomplete="off"></textarea>
+              <div id="diary-toc-left" class="diary-toc-pane" hidden></div>
+              <p class="diary-page-num" id="diary-left-num"></p>
+            </div>
+            <div class="diary-spine" aria-hidden="true"></div>
+            <div class="diary-page diary-page-right">
+              <p class="diary-page-head" id="diary-right-head"></p>
+              <textarea id="diary-right" class="diary-lines" rows="12" spellcheck="false" autocomplete="off"></textarea>
+              <div id="diary-toc-right" class="diary-toc-pane" hidden></div>
+              <p class="diary-page-num" id="diary-right-num"></p>
+            </div>
           </div>
         </div>
+
+        <p id="diary-status" class="diary-status" hidden></p>
       </section>
     </div>
 

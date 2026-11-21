@@ -3,11 +3,19 @@ import { supabase } from "./supabase.js";
 let paused = false;
 let onPauseChange = () => {};
 let closeTimer = 0;
+let saveTimer = 0;
 let editingId = null;
+let editingDate = "";
+let content = "";
+let spreadIndex = 0;
 let loading = false;
 let saving = false;
+let tocOpen = false;
 let listRequest = 0;
 let cachedEntries = [];
+let expandedYears = new Set();
+let expandedMonths = new Set();
+let measureEl = null;
 
 export function isGamePaused() {
   return paused;
@@ -17,8 +25,37 @@ export function onDiaryPause(handler) {
   onPauseChange = handler;
 }
 
-function todayLabel() {
-  return new Date().toLocaleDateString("zh-Hant", {
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function todayIso() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function parseEntryDate(entry) {
+  const raw = String(entry?.date || "");
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  }
+  const zh = raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (zh) {
+    return new Date(Number(zh[1]), Number(zh[2]) - 1, Number(zh[3]));
+  }
+  const created = entry?.created_at ? new Date(entry.created_at) : new Date();
+  return Number.isNaN(created.getTime()) ? new Date() : created;
+}
+
+function toIso(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function formatHead(iso) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString("zh-Hant", {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -30,14 +67,18 @@ function normalizeEntry(entry) {
   if (!entry || typeof entry !== "object") {
     return null;
   }
-  const title = String(entry.title || "").trim();
-  const content = String(entry.content || entry.body || "");
-  const date = String(entry.date || todayLabel());
   const id = String(entry.id || "");
   if (!id) {
     return null;
   }
-  return { id, date, title, content };
+  const parsed = parseEntryDate(entry);
+  return {
+    id,
+    date: toIso(parsed),
+    title: String(entry.title || "").trim(),
+    content: String(entry.content || entry.body || ""),
+    created_at: entry.created_at || null,
+  };
 }
 
 function setPaused(next) {
@@ -49,23 +90,24 @@ function setPaused(next) {
 function els() {
   return {
     modal: document.getElementById("diary-modal"),
-    paper: document.querySelector(".diary-paper"),
+    book: document.getElementById("diary-book"),
+    bookmark: document.querySelector(".diary-bookmark"),
     status: document.getElementById("diary-status"),
-    listView: document.getElementById("diary-list-view"),
-    editView: document.getElementById("diary-edit-view"),
-    list: document.getElementById("diary-list"),
-    empty: document.getElementById("diary-empty"),
-    date: document.getElementById("diary-date"),
-    title: document.getElementById("diary-heading"),
-    body: document.getElementById("diary-body"),
-    save: document.getElementById("diary-save"),
-    heading: document.getElementById("diary-label"),
+    left: document.getElementById("diary-left"),
+    right: document.getElementById("diary-right"),
+    leftHead: document.getElementById("diary-left-head"),
+    rightHead: document.getElementById("diary-right-head"),
+    leftNum: document.getElementById("diary-left-num"),
+    rightNum: document.getElementById("diary-right-num"),
+    tocLeft: document.getElementById("diary-toc-left"),
+    tocRight: document.getElementById("diary-toc-right"),
+    prev: document.getElementById("diary-prev"),
+    next: document.getElementById("diary-next"),
   };
 }
 
-function isBusy() {
-  return loading || saving;
-}
+let persistLock = false;
+let persistQueued = false;
 
 function setStatus(message, kind = "info") {
   const { status } = els();
@@ -86,34 +128,15 @@ function setStatus(message, kind = "info") {
 function setBusy(nextLoading, nextSaving) {
   loading = nextLoading;
   saving = nextSaving;
-  const { paper, title, body, save } = els();
-  paper?.classList.toggle("is-busy", isBusy());
-  const freeze = isBusy();
-  if (title) {
-    title.disabled = freeze;
+  const { book, left, right } = els();
+  book?.classList.toggle("is-busy", loading);
+  const freeze = loading;
+  if (left) {
+    left.disabled = freeze;
   }
-  if (body) {
-    body.disabled = freeze;
+  if (right) {
+    right.disabled = freeze;
   }
-  if (save) {
-    save.disabled = freeze;
-  }
-}
-
-function showView(name) {
-  const { listView, editView, heading } = els();
-  const isList = name === "list";
-  listView.hidden = !isList;
-  editView.hidden = isList;
-  heading.textContent = "日記";
-}
-
-function previewText(content) {
-  const text = String(content || "").replace(/\s+/g, " ").trim();
-  if (!text) {
-    return "（空白頁）";
-  }
-  return text.length > 36 ? `${text.slice(0, 36)}…` : text;
 }
 
 function formatSupabaseError(error) {
@@ -138,33 +161,336 @@ function reportDiaryError(action, error) {
   return detail;
 }
 
-function renderList(entries, options = {}) {
-  const { list, empty } = els();
-  cachedEntries = entries;
-  list.replaceChildren();
-  empty.hidden = Boolean(options.failed) || loading || entries.length > 0;
+function ensureMeasure() {
+  const { book, left } = els();
+  if (!book || !left) {
+    return null;
+  }
+  if (!measureEl) {
+    measureEl = document.createElement("textarea");
+    measureEl.className = "diary-measure";
+    measureEl.tabIndex = -1;
+    measureEl.setAttribute("aria-hidden", "true");
+    measureEl.readOnly = true;
+    book.append(measureEl);
+  }
+  const style = getComputedStyle(left);
+  measureEl.style.width = `${left.clientWidth}px`;
+  measureEl.style.height = `${left.clientHeight}px`;
+  measureEl.style.font = style.font;
+  measureEl.style.fontSize = style.fontSize;
+  measureEl.style.lineHeight = style.lineHeight;
+  measureEl.style.letterSpacing = style.letterSpacing;
+  measureEl.style.padding = style.padding;
+  return measureEl;
+}
 
-  for (const entry of entries) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "diary-item";
-    item.dataset.diary = "open-entry";
-    item.dataset.id = entry.id;
+function lineMetrics() {
+  const { left } = els();
+  const style = getComputedStyle(left);
+  const line = parseFloat(style.lineHeight) || 28;
+  const lines = Math.max(1, Math.round(left.clientHeight / line));
+  return { line, lines, height: line * lines };
+}
 
-    const date = document.createElement("span");
-    date.className = "diary-item-date";
-    date.textContent = entry.date;
+function charsFitting(text, maxHeight) {
+  const el = ensureMeasure();
+  if (!el) {
+    return text.length;
+  }
+  if (!text) {
+    return 0;
+  }
+  let lo = 0;
+  let hi = text.length;
+  let fit = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    el.value = text.slice(0, mid);
+    if (el.scrollHeight <= maxHeight + 1) {
+      fit = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return fit;
+}
 
-    const title = document.createElement("span");
-    title.className = "diary-item-title";
-    title.textContent = entry.title || "無標題";
+function splitPages(text) {
+  const { height } = lineMetrics();
+  const pages = [];
+  let offset = 0;
+  const source = String(text || "");
+  if (!source) {
+    return [{ start: 0, end: 0 }];
+  }
+  while (offset < source.length) {
+    let take = charsFitting(source.slice(offset), height);
+    if (take <= 0) {
+      take = 1;
+    }
+    pages.push({ start: offset, end: offset + take });
+    offset += take;
+  }
+  return pages;
+}
 
-    const preview = document.createElement("span");
-    preview.className = "diary-item-preview";
-    preview.textContent = previewText(entry.content);
+function isPageFull(pageText) {
+  const { height } = lineMetrics();
+  return charsFitting(`${pageText}字`, height) <= pageText.length;
+}
 
-    item.append(date, title, preview);
-    list.append(item);
+function spreadRange(text, index) {
+  const pages = splitPages(text);
+  const left = pages[index * 2];
+  const right = pages[index * 2 + 1];
+  const start = left?.start ?? text.length;
+  const end = right?.end ?? left?.end ?? text.length;
+  return { pages, start, end, left, right };
+}
+
+function lastWrittenSpread(text) {
+  const pages = splitPages(text);
+  if (text.length === 0) {
+    return 0;
+  }
+  return Math.max(0, Math.ceil(pages.length / 2) - 1);
+}
+
+function isSpreadFull(text, index) {
+  const { pages, right } = spreadRange(text, index);
+  if (!right) {
+    return false;
+  }
+  const last = pages[pages.length - 1];
+  if (last !== right && pages.length > index * 2 + 2) {
+    return true;
+  }
+  return isPageFull(text.slice(right.start, right.end));
+}
+
+function maxSpread(text) {
+  const last = lastWrittenSpread(text);
+  return isSpreadFull(text, last) ? last + 1 : last;
+}
+
+function localEntry(iso, id = null, body = "") {
+  return { id, date: iso, title: "", content: body };
+}
+
+function currentEntry() {
+  return cachedEntries.find((entry) => entry.date === editingDate) || localEntry(editingDate, editingId, content);
+}
+
+function renderSpread() {
+  const { left, right, leftHead, rightHead, leftNum, rightNum, prev, next, book } = els();
+  if (!left || !right) {
+    return;
+  }
+
+  book?.classList.toggle("is-toc", tocOpen);
+  els().bookmark?.classList.toggle("is-on", tocOpen);
+
+  const dateLabel = formatHead(editingDate || todayIso());
+  const { pages, left: leftPage, right: rightPage } = spreadRange(content, spreadIndex);
+  left.value = leftPage ? content.slice(leftPage.start, leftPage.end) : "";
+  right.value = rightPage ? content.slice(rightPage.start, rightPage.end) : "";
+  leftHead.textContent = tocOpen ? "目錄" : dateLabel;
+  rightHead.textContent = tocOpen ? "" : spreadIndex === 0 ? "日記" : "續";
+  leftNum.textContent = String(spreadIndex * 2 + 1);
+  rightNum.textContent = String(spreadIndex * 2 + 2);
+  prev.disabled = tocOpen || spreadIndex <= 0;
+  next.disabled = tocOpen || spreadIndex >= maxSpread(content);
+  left.readOnly = tocOpen;
+  right.readOnly = tocOpen;
+
+  if (tocOpen) {
+    renderToc();
+  } else if (els().tocLeft) {
+    els().tocLeft.hidden = true;
+    els().tocRight.hidden = true;
+  }
+}
+
+function entriesForToc() {
+  const list = [...cachedEntries];
+  if (editingDate && !list.some((entry) => entry.date === editingDate)) {
+    list.push({
+      id: editingId || "draft",
+      date: editingDate,
+      title: "",
+      content,
+    });
+  }
+  return list;
+}
+
+function tocTree() {
+  const years = new Map();
+  const sorted = [...entriesForToc()].sort((a, b) => b.date.localeCompare(a.date));
+  for (const entry of sorted) {
+    const date = parseEntryDate(entry);
+    const year = String(date.getFullYear());
+    const month = pad2(date.getMonth() + 1);
+    if (!years.has(year)) {
+      years.set(year, new Map());
+    }
+    const months = years.get(year);
+    if (!months.has(month)) {
+      months.set(month, []);
+    }
+    months.get(month).push({ entry, date });
+  }
+  return years;
+}
+
+function renderToc() {
+  const { tocLeft, tocRight } = els();
+  tocLeft.hidden = false;
+  tocRight.hidden = false;
+  tocLeft.replaceChildren();
+  tocRight.replaceChildren();
+
+  const title = document.createElement("p");
+  title.className = "diary-toc-title";
+  title.textContent = "目錄";
+  tocLeft.append(title);
+
+  const years = tocTree();
+  if (years.size === 0) {
+    const empty = document.createElement("p");
+    empty.className = "diary-toc-empty";
+    empty.textContent = "還沒有寫過的日子。";
+    tocLeft.append(empty);
+    return;
+  }
+
+  const yearKeys = [...years.keys()].sort((a, b) => Number(b) - Number(a));
+  const leftYears = yearKeys.filter((_, i) => i % 2 === 0);
+  const rightYears = yearKeys.filter((_, i) => i % 2 === 1);
+
+  function paint(root, keys) {
+    for (const year of keys) {
+      const yearBtn = document.createElement("button");
+      yearBtn.type = "button";
+      yearBtn.className = `diary-toc-year${expandedYears.has(year) ? " is-open" : ""}`;
+      yearBtn.dataset.diary = "toc-year";
+      yearBtn.dataset.year = year;
+      yearBtn.textContent = `${year}年`;
+      root.append(yearBtn);
+
+      const yearNest = document.createElement("div");
+      yearNest.className = `diary-toc-nested${expandedYears.has(year) ? " is-open" : ""}`;
+      const months = years.get(year);
+      const monthKeys = [...months.keys()].sort((a, b) => Number(b) - Number(a));
+      for (const month of monthKeys) {
+        const key = `${year}-${month}`;
+        const monthBtn = document.createElement("button");
+        monthBtn.type = "button";
+        monthBtn.className = `diary-toc-month${expandedMonths.has(key) ? " is-open" : ""}`;
+        monthBtn.dataset.diary = "toc-month";
+        monthBtn.dataset.month = key;
+        monthBtn.textContent = `${Number(month)}月`;
+        yearNest.append(monthBtn);
+
+        const monthNest = document.createElement("div");
+        monthNest.className = `diary-toc-nested${expandedMonths.has(key) ? " is-open" : ""}`;
+        const days = months.get(month).sort((a, b) => b.date - a.date);
+        const seen = new Set();
+        for (const item of days) {
+          if (seen.has(item.entry.date)) {
+            continue;
+          }
+          seen.add(item.entry.date);
+          const dayBtn = document.createElement("button");
+          dayBtn.type = "button";
+          dayBtn.className = "diary-toc-day";
+          dayBtn.dataset.diary = "toc-day";
+          dayBtn.dataset.date = item.entry.date;
+          dayBtn.textContent = `${item.date.getDate()}日`;
+          monthNest.append(dayBtn);
+        }
+        yearNest.append(monthNest);
+      }
+      root.append(yearNest);
+    }
+  }
+
+  paint(tocLeft, leftYears);
+  paint(tocRight, rightYears);
+}
+
+function openToc() {
+  tocOpen = true;
+  const now = parseEntryDate(currentEntry());
+  expandedYears.add(String(now.getFullYear()));
+  expandedMonths.add(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
+  renderSpread();
+}
+
+function closeToc() {
+  tocOpen = false;
+  renderSpread();
+}
+
+function applyEdit(side) {
+  const { left, right } = els();
+  const caret = side === "left" ? left.selectionStart : right.selectionStart;
+  const { start, end } = spreadRange(content, spreadIndex);
+  const hadLater = content.slice(end).length > 0;
+  let next = content.slice(0, start) + left.value + right.value + content.slice(end);
+
+  if (!hadLater) {
+    const allowed = splitPages(next).slice(0, spreadIndex * 2 + 2);
+    const last = allowed[allowed.length - 1];
+    const cap = last?.end ?? start;
+    if (next.length > cap) {
+      next = next.slice(0, cap);
+    }
+  }
+
+  content = next;
+  const entry = cachedEntries.find((item) => item.date === editingDate);
+  if (entry) {
+    entry.content = content;
+  }
+  renderSpread();
+
+  if (tocOpen) {
+    scheduleSave();
+    return;
+  }
+
+  const newLeft = left.value.length;
+  if (side === "left" && caret > newLeft) {
+    const pos = Math.min(Math.max(0, caret - newLeft), right.value.length);
+    right.focus();
+    right.setSelectionRange(pos, pos);
+  } else if (side === "left") {
+    const pos = Math.min(caret, left.value.length);
+    left.setSelectionRange(pos, pos);
+  } else {
+    const pos = Math.min(caret, right.value.length);
+    right.setSelectionRange(pos, pos);
+  }
+
+  scheduleSave();
+}
+
+function emptyToday() {
+  return localEntry(todayIso());
+}
+
+function openDay(entry, nextSpread = 0) {
+  tocOpen = false;
+  editingId = entry.id;
+  editingDate = entry.date;
+  content = entry.content || "";
+  spreadIndex = Math.max(0, Math.min(nextSpread, maxSpread(content)));
+  renderSpread();
+  if (!loading) {
+    els().left?.focus();
   }
 }
 
@@ -186,47 +512,85 @@ async function fetchEntries() {
     if (error) {
       setBusy(false, saving);
       setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
-      renderList([], { failed: true });
+      cachedEntries = [];
+      openDay(emptyToday());
       return [];
     }
 
-    const entries = (data || []).map(normalizeEntry).filter(Boolean);
+    cachedEntries = (data || []).map(normalizeEntry).filter(Boolean);
     setBusy(false, saving);
     setStatus("");
-    renderList(entries);
-    return entries;
+    return cachedEntries;
   } catch (error) {
     if (requestId !== listRequest) {
       return cachedEntries;
     }
     setBusy(false, saving);
     setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
-    renderList([], { failed: true });
+    cachedEntries = [];
+    openDay(emptyToday());
     return [];
   }
 }
 
-function fillForm(entry) {
-  const { date, title, body } = els();
-  date.textContent = entry?.date || todayLabel();
-  title.value = entry?.title || "";
-  body.value = entry?.content || "";
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    void persist();
+  }, 700);
 }
 
-function openEditor(entry) {
-  if (isBusy()) {
+async function persist() {
+  if (loading || !editingDate) {
     return;
   }
-  editingId = entry?.id || null;
-  fillForm(entry);
-  showView("edit");
-  els().title?.focus();
-}
+  if (!editingId && !content.trim()) {
+    return;
+  }
+  if (persistLock) {
+    persistQueued = true;
+    return;
+  }
 
-async function showList() {
-  editingId = null;
-  showView("list");
-  await fetchEntries();
+  persistLock = true;
+  saving = true;
+  setStatus("儲存中…");
+
+  const payload = {
+    date: editingDate,
+    title: content.trim().slice(0, 40),
+    content,
+  };
+
+  const query = editingId
+    ? supabase.from("diaries").update(payload).eq("id", editingId).select("id, created_at, date, title, content").single()
+    : supabase.from("diaries").insert(payload).select("id, created_at, date, title, content").single();
+
+  let data;
+  let error;
+  try {
+    ({ data, error } = await query);
+  } catch (caught) {
+    error = caught;
+  }
+
+  saving = false;
+  persistLock = false;
+  if (error || !data) {
+    setStatus(`儲存失敗：${reportDiaryError(editingId ? "update" : "insert", error || "沒有回傳資料")}`, "error");
+    return;
+  }
+
+  const saved = normalizeEntry(data);
+  if (saved) {
+    editingId = saved.id;
+    cachedEntries = [saved, ...cachedEntries.filter((entry) => entry.id !== saved.id && entry.date !== saved.date)];
+  }
+  setStatus("");
+  if (persistQueued) {
+    persistQueued = false;
+    await persist();
+  }
 }
 
 export function openDiary() {
@@ -236,25 +600,37 @@ export function openDiary() {
   }
 
   clearTimeout(closeTimer);
+  tocOpen = false;
+  spreadIndex = 0;
+  content = "";
   editingId = null;
-  renderList([]);
-  showView("list");
+  editingDate = todayIso();
   modal.hidden = false;
   modal.inert = false;
   requestAnimationFrame(() => {
     modal.classList.add("open");
+    renderSpread();
   });
   setPaused(true);
-  void fetchEntries();
+
+  void fetchEntries().then((entries) => {
+    const today = todayIso();
+    const match = entries.find((entry) => entry.date === today);
+    openDay(match || emptyToday());
+  });
 }
 
 export function closeDiary() {
   const { modal } = els();
-  if (!modal || modal.hidden || saving) {
+  if (!modal || modal.hidden) {
     return;
   }
 
   listRequest += 1;
+  clearTimeout(saveTimer);
+  if (content.trim() || editingId) {
+    void persist();
+  }
   loading = false;
   setBusy(false, false);
   modal.classList.remove("open");
@@ -265,57 +641,17 @@ export function closeDiary() {
   }, 240);
 }
 
-async function persist() {
-  const { title, body, save } = els();
-  if (isBusy() || !title || !body || !save) {
+function flip(delta) {
+  if (tocOpen || loading) {
     return;
   }
-
-  setBusy(false, true);
-  save.textContent = "儲存中…";
-  setStatus("儲存中…");
-
-  const payload = {
-    date: editingId
-      ? cachedEntries.find((entry) => entry.id === editingId)?.date || todayLabel()
-      : todayLabel(),
-    title: title.value.trim(),
-    content: body.value,
-  };
-
-  const query = editingId
-    ? supabase.from("diaries").update(payload).eq("id", editingId).select("id, date, title, content").single()
-    : supabase.from("diaries").insert(payload).select("id, date, title, content").single();
-
-  let data;
-  let error;
-  try {
-    ({ data, error } = await query);
-  } catch (caught) {
-    error = caught;
-  }
-
-  if (error || !data) {
-    setBusy(false, false);
-    save.textContent = "儲存";
-    setStatus(`儲存失敗：${reportDiaryError(editingId ? "update" : "insert", error || "沒有回傳資料")}`, "error");
+  const next = spreadIndex + delta;
+  if (next < 0 || next > maxSpread(content)) {
     return;
   }
-
-  const saved = normalizeEntry(data);
-  if (saved) {
-    editingId = saved.id;
-    const others = cachedEntries.filter((entry) => entry.id !== saved.id);
-    cachedEntries = [saved, ...others];
-  }
-
-  setBusy(false, false);
-  setStatus("");
-  save.textContent = "已儲存";
-  clearTimeout(persist._timer);
-  persist._timer = setTimeout(() => {
-    save.textContent = "儲存";
-  }, 900);
+  spreadIndex = next;
+  renderSpread();
+  els().left?.focus();
 }
 
 export function initDiary() {
@@ -324,31 +660,51 @@ export function initDiary() {
     return;
   }
 
+  const { left, right } = els();
+  left?.addEventListener("input", () => applyEdit("left"));
+  right?.addEventListener("input", () => applyEdit("right"));
+
   modal.addEventListener("click", (event) => {
     const actionEl = event.target.closest("[data-diary]");
     const action = actionEl?.dataset.diary;
     if (action === "close" || action === "backdrop") {
       closeDiary();
     }
-    if (action === "save") {
-      void persist();
-    }
-    if (action === "new") {
-      openEditor(null);
-    }
-    if (action === "back") {
-      if (isBusy()) {
-        return;
+    if (action === "toc") {
+      if (tocOpen) {
+        closeToc();
+      } else {
+        openToc();
       }
-      void showList();
     }
-    if (action === "open-entry") {
-      if (isBusy()) {
-        return;
+    if (action === "prev") {
+      flip(-1);
+    }
+    if (action === "next") {
+      flip(1);
+    }
+    if (action === "toc-year") {
+      const year = actionEl.dataset.year;
+      if (expandedYears.has(year)) {
+        expandedYears.delete(year);
+      } else {
+        expandedYears.add(year);
       }
-      const entry = cachedEntries.find((item) => item.id === actionEl.dataset.id);
+      renderToc();
+    }
+    if (action === "toc-month") {
+      const month = actionEl.dataset.month;
+      if (expandedMonths.has(month)) {
+        expandedMonths.delete(month);
+      } else {
+        expandedMonths.add(month);
+      }
+      renderToc();
+    }
+    if (action === "toc-day") {
+      const entry = cachedEntries.find((item) => item.date === actionEl.dataset.date);
       if (entry) {
-        openEditor(entry);
+        openDay(entry);
       }
     }
   });
@@ -359,15 +715,26 @@ export function initDiary() {
     }
     if (event.code === "Escape") {
       event.preventDefault();
-      if (isBusy()) {
-        return;
-      }
-      const { editView } = els();
-      if (editView && !editView.hidden) {
-        void showList();
+      if (tocOpen) {
+        closeToc();
         return;
       }
       closeDiary();
+    }
+    if (tocOpen || event.target?.closest?.(".diary-lines")) {
+      return;
+    }
+    if (event.code === "ArrowLeft") {
+      flip(-1);
+    }
+    if (event.code === "ArrowRight") {
+      flip(1);
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if (paused) {
+      renderSpread();
     }
   });
 }

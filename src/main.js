@@ -43,11 +43,11 @@ k.debug.inspect = false;
 k.debug.showLog = false;
 
 k.loadSprite("goose", "/assets/goose.png", { singular: true });
-k.loadSprite("cabinet", "/assets/cabinet.png?v=3", { singular: true });
+k.loadSprite("cabinet", "/assets/cabinet.png?v=4", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=4", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=5", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -78,13 +78,47 @@ function addBlock(x, y, w, h) {
   ]);
 }
 
-function ipohHour() {
-  const hour = new Intl.DateTimeFormat("en-GB", {
+function ipohParts() {
+  const map = {};
+  for (const part of new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kuala_Lumpur",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(new Date()).find((part) => part.type === "hour");
-  return Number(hour?.value ?? 0);
+  }).formatToParts(new Date())) {
+    map[part.type] = part.value;
+  }
+  return {
+    year: Number(map.year ?? 0),
+    month: Number(map.month ?? 1),
+    day: Number(map.day ?? 1),
+    hour: Number(map.hour ?? 0),
+  };
+}
+
+function moonPhaseFrac() {
+  const synodic = 29.530588853;
+  const knownNew = Date.UTC(2000, 0, 6, 18, 14);
+  let age = (Date.now() - knownNew) / 86400000;
+  age %= synodic;
+  if (age < 0) {
+    age += synodic;
+  }
+  return age / synodic;
+}
+
+function discLit(dx, dy, phase) {
+  if (dx * dx + dy * dy > 20) {
+    return null;
+  }
+  const nx = dx / 4.2;
+  const term = Math.cos(phase * Math.PI * 2);
+  if (phase <= 0.5) {
+    return nx >= term;
+  }
+  return nx <= -term;
 }
 
 function addSolid(name, x, y, hit, prompt, kind, scale = 1) {
@@ -185,45 +219,71 @@ k.scene("room", () => {
   addBlock(GAME_SIZE - TILE, 0, TILE, GAME_SIZE);
   addBlock(0, GAME_SIZE - TILE, GAME_SIZE, TILE);
 
-  const WIN_SCALE = 1.5;
-  const WIN_W = 22 * WIN_SCALE;
-  const WIN_Y = 2;
-  const WIN_XS = [94, 130];
-  const BODY = 6;
-  const GLASS = WIN_XS.map((x) => ({
-    x: x + 2 * WIN_SCALE,
-    y: WIN_Y + 2 * WIN_SCALE,
-    w: 18 * WIN_SCALE,
-    h: 12 * WIN_SCALE,
-  }));
+  const WIN_W = 56;
+  const WIN_H = 22;
+  const WIN_X = Math.round((GAME_SIZE - WIN_W) / 2);
+  const WIN_Y = 8;
+  const RADIUS = 4;
+  const glass = {
+    x: WIN_X + 2,
+    y: WIN_Y + 2,
+    w: WIN_W - 4,
+    h: WIN_H - 4,
+  };
 
-  for (const x of WIN_XS) {
-    k.add([k.sprite("window"), k.pos(x, WIN_Y), k.scale(WIN_SCALE), k.z(3)]);
-  }
+  k.add([k.sprite("window"), k.pos(WIN_X, WIN_Y), k.z(3)]);
 
-  const skyPanes = GLASS.map((glass) =>
+  const skyPane = k.add([
+    k.rect(glass.w, glass.h),
+    k.pos(glass.x, glass.y),
+    k.color(120, 180, 220),
+    k.z(4),
+  ]);
+
+  const starDots = [
+    [5, 3],
+    [11, 10],
+    [18, 5],
+    [24, 13],
+    [31, 4],
+    [38, 9],
+    [44, 14],
+    [8, 15],
+    [47, 6],
+    [27, 2],
+  ].map(([sx, sy], i) =>
     k.add([
-      k.rect(glass.w, glass.h),
-      k.pos(glass.x, glass.y),
-      k.color(120, 180, 220),
-      k.z(4),
+      k.rect(1, 1),
+      k.pos(glass.x + sx, glass.y + sy),
+      k.color(i % 3 === 0 ? 255 : 220, i % 3 === 0 ? 236 : 228, 255),
+      k.z(4.05),
+      k.opacity(0),
     ]),
   );
 
-  const sun = k.add([
-    k.rect(BODY, BODY),
-    k.pos(0, 0),
-    k.color(255, 214, 74),
-    k.z(4.1),
-    k.opacity(0),
-  ]);
-  const moon = k.add([
-    k.rect(BODY, BODY),
-    k.pos(0, 0),
-    k.color(240, 244, 255),
-    k.z(4.1),
-    k.opacity(0),
-  ]);
+  const sun = k.add([k.pos(0, 0), k.z(4.2)]);
+  const moon = k.add([k.pos(0, 0), k.z(4.2)]);
+  const sunDots = [];
+  const moonDots = [];
+  for (let dy = -RADIUS; dy <= RADIUS; dy += 1) {
+    for (let dx = -RADIUS; dx <= RADIUS; dx += 1) {
+      if (dx * dx + dy * dy > 20) {
+        continue;
+      }
+      sunDots.push(
+        sun.add([
+          k.rect(1, 1),
+          k.pos(dx, dy),
+          k.color(dx === 0 && dy === 0 ? 255 : 255, dx === 0 && dy === 0 ? 236 : 210, 74),
+        ]),
+      );
+      moonDots.push({
+        dx,
+        dy,
+        obj: moon.add([k.rect(1, 1), k.pos(dx, dy), k.color(240, 244, 255)]),
+      });
+    }
+  }
 
   function skyTone(hour) {
     if (hour >= 6 && hour < 8) {
@@ -235,44 +295,53 @@ k.scene("room", () => {
     if (hour >= 16 && hour < 18) {
       return [236, 128, 86];
     }
-    return [28, 34, 62];
+    return [24, 30, 58];
   }
 
-  function bodyInGlass(x, y) {
-    return GLASS.some(
-      (glass) =>
-        x >= glass.x &&
-        x <= glass.x + glass.w - BODY &&
-        y >= glass.y &&
-        y <= glass.y + glass.h - BODY,
+  function bodyInGlass(cx, cy) {
+    return (
+      cx - RADIUS >= glass.x + 1 &&
+      cx + RADIUS <= glass.x + glass.w - 2 &&
+      cy - RADIUS >= glass.y + 1 &&
+      cy + RADIUS <= glass.y + glass.h - 2
     );
   }
 
   function updateSky() {
-    const hour = ipohHour();
+    const { hour } = ipohParts();
     const tone = skyTone(hour);
-    for (const pane of skyPanes) {
-      pane.color = k.rgb(tone[0], tone[1], tone[2]);
-    }
-    const span0 = GLASS[0].x;
-    const span1 = GLASS[1].x + GLASS[1].w - BODY;
+    skyPane.color = k.rgb(tone[0], tone[1], tone[2]);
     const day = hour >= 6 && hour < 18;
+    const night = hour < 6 || hour >= 19;
     const t = day ? (hour - 6) / 12 : ((hour + 6) % 24) / 12;
-    const x = Math.round(span0 + t * (span1 - span0));
-    const yLow = GLASS[0].y + GLASS[0].h - BODY - 1;
-    const yHigh = GLASS[0].y + 1;
-    const y = Math.round(yLow - Math.sin(t * Math.PI) * (yLow - yHigh));
-    const visible = bodyInGlass(x, y);
-    sun.pos = k.vec2(x, y);
-    moon.pos = k.vec2(x, y);
-    sun.opacity = day && visible ? 1 : 0;
-    moon.opacity = !day && visible ? 1 : 0;
+    const cx = Math.round(glass.x + RADIUS + 1 + t * (glass.w - RADIUS * 2 - 2));
+    const yLow = glass.y + glass.h - RADIUS - 2;
+    const yHigh = glass.y + RADIUS + 1;
+    const cy = Math.round(yLow - Math.sin(t * Math.PI) * (yLow - yHigh));
+    const visible = bodyInGlass(cx, cy);
+    sun.pos = k.vec2(cx, cy);
+    moon.pos = k.vec2(cx, cy);
+    sun.hidden = !(day && visible);
+    moon.hidden = !(!day && visible);
+
+    const phase = moonPhaseFrac();
+    for (const cell of moonDots) {
+      const lit = discLit(cell.dx, cell.dy, phase);
+      cell.obj.hidden = lit !== true;
+      if (lit === true) {
+        cell.obj.color = k.rgb(240, 244, 255);
+      }
+    }
+
+    for (const star of starDots) {
+      star.opacity = night ? 1 : 0;
+    }
   }
 
   updateSky();
-  let lastHour = ipohHour();
+  let lastHour = ipohParts().hour;
   k.onUpdate(() => {
-    const hour = ipohHour();
+    const hour = ipohParts().hour;
     if (hour !== lastHour) {
       lastHour = hour;
       updateSky();

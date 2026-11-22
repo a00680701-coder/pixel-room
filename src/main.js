@@ -10,6 +10,7 @@ import {
   touchInput,
 } from "./touch-controls.js";
 import { initDiary, isGamePaused, onDiaryPause, openDiary } from "./diary.js";
+import { supabase } from "./supabase.js";
 
 const ROOM_TILES = 16;
 const GAME_SIZE = TILE * ROOM_TILES;
@@ -36,6 +37,16 @@ const k = kaplay({
 });
 
 const INTERACT_GAP = 28;
+const PLANTS_STORE_KEY = "pixel-room-plants";
+const PLANTS_BOX_ID = "c0ffee00-1111-4111-8111-00000000b002";
+const PLANTS_BOX_TITLE = "\u001fplant-box";
+const DEFAULT_PLANTS = [
+  { id: "plant-1", name: "palm", x: 22, y: 174, hit: { x: 3, y: 24, w: 13, h: 8 } },
+  { id: "plant-2", name: "bush", x: 204, y: 175, hit: { x: 6, y: 24, w: 12, h: 8 } },
+  { id: "plant-3", name: "bush", x: 68, y: 33, hit: { x: 6, y: 24, w: 12, h: 8 } },
+  { id: "plant-4", name: "palm", x: 148, y: 68, hit: { x: 3, y: 24, w: 13, h: 8 } },
+  { id: "plant-5", name: "bush", x: 112, y: 195, hit: { x: 6, y: 24, w: 12, h: 8 } },
+];
 
 k.setBackground(18, 14, 22);
 k.setGravity(0);
@@ -135,12 +146,13 @@ function addSolid(name, x, y, hit, prompt, kind, scale = 1) {
     "solid",
   ];
 
-  if (prompt) {
+  if (prompt || kind === "plant") {
     comps.push("interact");
   }
 
   const obj = k.add(comps);
   obj.hit = hit;
+  obj.spriteName = name;
   if (prompt) {
     obj.prompt = prompt;
   }
@@ -148,6 +160,132 @@ function addSolid(name, x, y, hit, prompt, kind, scale = 1) {
     obj.kind = kind;
   }
   return obj;
+}
+
+function unionHit(a, b) {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
+
+function plantCarryLocal(plant, facing) {
+  const hit = plant.hit;
+  const cx = hit.x + hit.w / 2;
+  const potBottom = hit.y + hit.h;
+  if (facing === "left") {
+    return k.vec2(-hit.x - hit.w - 2, HIT_Y + HIT_H - potBottom);
+  }
+  if (facing === "right") {
+    return k.vec2(HIT_W / 2 - hit.x + 4, HIT_Y + HIT_H - potBottom);
+  }
+  if (facing === "up") {
+    return k.vec2(-cx, HIT_Y - potBottom - 2);
+  }
+  return k.vec2(-cx, HIT_Y + HIT_H - hit.y);
+}
+
+function carriedPlantHit(plant, facing) {
+  const local = plantCarryLocal(plant, facing);
+  return {
+    x: local.x + plant.hit.x,
+    y: local.y + plant.hit.y,
+    w: plant.hit.w,
+    h: plant.hit.h,
+  };
+}
+
+function playerMoveHit(hitX, carrying, facing) {
+  const gooseHit = { x: hitX, y: HIT_Y, w: HIT_W, h: HIT_H };
+  if (!carrying) {
+    return gooseHit;
+  }
+  return unionHit(gooseHit, carriedPlantHit(carrying, facing));
+}
+
+function snapshotPlants(plants) {
+  return plants.map((plant) => ({
+    id: plant.plantId,
+    x: Math.round(plant.pos.x),
+    y: Math.round(plant.pos.y),
+  }));
+}
+
+function applyPlantSnapshot(plants, rows, skip) {
+  if (!Array.isArray(rows)) {
+    return;
+  }
+  for (const row of rows) {
+    const plant = plants.find((item) => item.plantId === row.id);
+    if (!plant || plant === skip) {
+      continue;
+    }
+    const x = Math.round(Number(row.x));
+    const y = Math.round(Number(row.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue;
+    }
+    plant.pos = k.vec2(
+      k.clamp(x, TILE, GAME_SIZE - TILE - 20),
+      k.clamp(y, TILE, GAME_SIZE - TILE - 20),
+    );
+    plant.z = plant.pos.y + plant.hit.y + plant.hit.h;
+  }
+}
+
+function readLocalPlants() {
+  try {
+    return JSON.parse(localStorage.getItem(PLANTS_STORE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalPlants(plants) {
+  localStorage.setItem(PLANTS_STORE_KEY, JSON.stringify(snapshotPlants(plants)));
+}
+
+async function persistPlants(plants) {
+  const payload = snapshotPlants(plants);
+  localStorage.setItem(PLANTS_STORE_KEY, JSON.stringify(payload));
+  try {
+    await supabase.from("diaries").upsert(
+      {
+        id: PLANTS_BOX_ID,
+        date: "plant-box",
+        title: PLANTS_BOX_TITLE,
+        content: JSON.stringify(payload),
+      },
+      { onConflict: "id" },
+    );
+  } catch {
+    /* local cache still holds the layout */
+  }
+}
+
+async function loadCloudPlants(plants, skip) {
+  applyPlantSnapshot(plants, readLocalPlants(), skip);
+  try {
+    const { data, error } = await supabase
+      .from("diaries")
+      .select("id, content")
+      .eq("id", PLANTS_BOX_ID)
+      .maybeSingle();
+    if (error || !data?.content) {
+      if (plants.length) {
+        await persistPlants(plants);
+      }
+      return;
+    }
+    applyPlantSnapshot(plants, JSON.parse(data.content), skip);
+    writeLocalPlants(plants);
+  } catch {
+    /* keep local / default positions */
+  }
 }
 
 function gapToHit(player, obj, hitX) {
@@ -160,10 +298,13 @@ function gapToHit(player, obj, hitX) {
   return Math.hypot(dx, dy);
 }
 
-function nearestInteract(player, hitX) {
+function nearestInteract(player, hitX, skip = null) {
   const found = [];
 
   for (const obj of k.get("interact")) {
+    if (obj === skip || obj.carried) {
+      continue;
+    }
     const gap = gapToHit(player, obj, hitX);
     const limit = obj.kind === "diary" ? 40 : INTERACT_GAP;
     if (gap <= limit) {
@@ -351,11 +492,14 @@ k.scene("room", () => {
   addSolid("cabinet", 18, 16, { x: 4, y: 48, w: 40, h: 14 }, "衣櫃裡疊著換季的衣服。");
   addSolid("bookcase", 184, 16, { x: 2, y: 28, w: 28, h: 10 }, "書櫃上排滿舊筆記與繪本。", null, 1.4);
 
-  addSolid("palm", 22, 174, { x: 3, y: 24, w: 13, h: 8 });
-  addSolid("bush", 204, 175, { x: 6, y: 24, w: 12, h: 8 });
-  addSolid("bush", 68, 33, { x: 6, y: 24, w: 12, h: 8 });
-  addSolid("palm", 148, 68, { x: 3, y: 24, w: 13, h: 8 });
-  addSolid("bush", 112, 195, { x: 6, y: 24, w: 12, h: 8 });
+  const plants = DEFAULT_PLANTS.map((spec) => {
+    const plant = addSolid(spec.name, spec.x, spec.y, spec.hit, null, "plant");
+    plant.plantId = spec.id;
+    plant.carried = false;
+    return plant;
+  });
+  applyPlantSnapshot(plants, readLocalPlants(), null);
+  void loadCloudPlants(plants, null);
 
   addSolid(
     "desk",
@@ -389,14 +533,95 @@ k.scene("room", () => {
   ]);
 
   let facing = "down";
+  let carrying = null;
+  let plantSaveTimer = 0;
+
+  function setCarriedCollision(enabled) {
+    if (!carrying) {
+      return;
+    }
+    if (enabled) {
+      carrying.carried = false;
+      carrying.area.enabled = true;
+      if (!carrying.body) {
+        carrying.use(k.body({ isStatic: true }));
+      }
+      return;
+    }
+    carrying.carried = true;
+    carrying.area.enabled = false;
+    if (carrying.body) {
+      carrying.unuse("body");
+    }
+  }
+
+  function followCarriedPlant() {
+    if (!carrying) {
+      return;
+    }
+    const local = plantCarryLocal(carrying, facing);
+    carrying.pos = k.vec2(
+      Math.round(player.pos.x + local.x),
+      Math.round(player.pos.y + local.y),
+    );
+    carrying.z = player.z + 8;
+  }
+
+  function pickPlant(plant) {
+    if (carrying || !plant || plant.kind !== "plant") {
+      return;
+    }
+    carrying = plant;
+    setCarriedCollision(false);
+    followCarriedPlant();
+    showToast("拿著盆栽。走到空地再點一下放下。");
+  }
+
+  function dropPlant() {
+    if (!carrying) {
+      return;
+    }
+    const plant = carrying;
+    followCarriedPlant();
+    carrying = null;
+    plant.carried = false;
+    plant.area.enabled = true;
+    if (!plant.body) {
+      plant.use(k.body({ isStatic: true }));
+    }
+    plant.z = plant.pos.y + plant.hit.y + plant.hit.h;
+    showToast("放下盆栽。");
+    clearTimeout(plantSaveTimer);
+    plantSaveTimer = setTimeout(() => {
+      void persistPlants(plants);
+    }, 200);
+  }
 
   const tryInteract = () => {
     if (isGamePaused()) {
       return;
     }
     const hitX = gooseHitX(goose.flipX);
-    const target = nearestInteract(player, hitX);
+    const target = nearestInteract(player, hitX, carrying);
+
+    if (carrying) {
+      if (target && target.kind !== "plant") {
+        if (target.kind === "diary") {
+          openDiary();
+          return;
+        }
+        showToast(target.prompt);
+        return;
+      }
+      dropPlant();
+      return;
+    }
+
     if (!target) {
+      return;
+    }
+    if (target.kind === "plant") {
+      pickPlant(target);
       return;
     }
     if (target.kind === "diary") {
@@ -455,35 +680,39 @@ k.scene("room", () => {
       } else {
         facing = dir.y < 0 ? "up" : "down";
       }
-
-      player.move(dir.unit().scale(SPEED));
-    } else {
-      player.vel = k.vec2(0, 0);
     }
 
     if (facing === "left") goose.flipX = false;
     if (facing === "right") goose.flipX = true;
 
+    const hitX = gooseHitX(goose.flipX);
+    const moveHit = playerMoveHit(hitX, carrying, facing);
     player.area.shape = new k.Rect(
-      k.vec2(gooseHitX(goose.flipX), HIT_Y),
-      HIT_W,
-      HIT_H,
+      k.vec2(moveHit.x, moveHit.y),
+      moveHit.w,
+      moveHit.h,
     );
 
-    const hitX = gooseHitX(goose.flipX);
-    const minX = TILE - hitX;
-    const maxX = GAME_SIZE - TILE - (hitX + HIT_W);
-    const minY = TILE * 2 - HIT_Y;
-    const maxY = GAME_SIZE - TILE - (HIT_Y + HIT_H);
+    if (moving) {
+      player.move(dir.unit().scale(SPEED));
+    } else {
+      player.vel = k.vec2(0, 0);
+    }
+
+    const minX = TILE - moveHit.x;
+    const maxX = GAME_SIZE - TILE - (moveHit.x + moveHit.w);
+    const minY = TILE * 2 - moveHit.y;
+    const maxY = GAME_SIZE - TILE - (moveHit.y + moveHit.h);
 
     player.pos.x = Math.round(k.clamp(player.pos.x, minX, maxX));
     player.pos.y = Math.round(k.clamp(player.pos.y, minY, maxY));
 
     goose.pos.y = -4 + (moving ? Math.round(Math.sin(k.time() * 14)) : 0);
     player.z = player.pos.y + HIT_Y + HIT_H;
+    followCarriedPlant();
 
-    const near = nearestInteract(player, hitX);
-    setInteractHint(Boolean(near));
+    const near = nearestInteract(player, hitX, carrying);
+    setInteractHint(Boolean(near) || Boolean(carrying));
 
     if (consumeAction()) {
       tryInteract();

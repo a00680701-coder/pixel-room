@@ -27,6 +27,8 @@ const TITLE_AUTHOR_SEP = "\u001f";
 const PENCIL_STORE_KEY = "pixel-room-pencils";
 const PENCIL_BOX_ID = "c0ffee00-1111-4111-8111-00000000b001";
 const PENCIL_BOX_TITLE = `${TITLE_AUTHOR_SEP}pencil-box`;
+const PLANTS_BOX_ID = "c0ffee00-1111-4111-8111-00000000b002";
+const PLANTS_BOX_TITLE = `${TITLE_AUTHOR_SEP}plant-box`;
 
 let pencilState = {
   current: "honey",
@@ -163,6 +165,17 @@ function isPencilBoxRecord(row) {
   const id = String(row?.id || "");
   const title = String(row?.title || "");
   return id === PENCIL_BOX_ID || title === PENCIL_BOX_TITLE || title.startsWith(PENCIL_BOX_TITLE);
+}
+
+function isHiddenDiaryRecord(row) {
+  const id = String(row?.id || "");
+  const title = String(row?.title || "");
+  return (
+    isPencilBoxRecord(row) ||
+    id === PLANTS_BOX_ID ||
+    title === PLANTS_BOX_TITLE ||
+    title.startsWith(PLANTS_BOX_TITLE)
+  );
 }
 
 function applyPencilPayload(raw, { fillDefaults = false } = {}) {
@@ -905,7 +918,7 @@ async function fetchEntries() {
         /* keep local names */
       }
     }
-    cachedEntries = (data || []).filter((row) => !isPencilBoxRecord(row)).map(normalizeEntry).filter(Boolean);
+    cachedEntries = (data || []).filter((row) => !isHiddenDiaryRecord(row)).map(normalizeEntry).filter(Boolean);
     setBusy(false, saving);
     setStatus("");
     return cachedEntries;
@@ -930,7 +943,7 @@ function scheduleSave() {
 
 async function persist(forced) {
   const state = forced || captureState();
-  if (loading || !state.date || state.id === PENCIL_BOX_ID) {
+  if (loading || !state.date || state.id === PENCIL_BOX_ID || state.id === PLANTS_BOX_ID) {
     return;
   }
   if (!state.id && !state.body.trim() && !isCustomTitle(state.title)) {
@@ -977,7 +990,7 @@ async function persist(forced) {
     return;
   }
 
-  const saved = isPencilBoxRecord(data) ? null : normalizeEntry(data);
+  const saved = isHiddenDiaryRecord(data) ? null : normalizeEntry(data);
   if (saved) {
     if (editingId === state.id) {
       editingId = saved.id;

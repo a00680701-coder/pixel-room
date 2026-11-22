@@ -25,11 +25,15 @@ const DEFAULT_PENCIL_NAME = "誰的筆";
 const DEFAULT_AUTHOR = "某個人";
 const TITLE_AUTHOR_SEP = "\u001f";
 const PENCIL_STORE_KEY = "pixel-room-pencils";
+const PENCIL_BOX_ID = "c0ffee00-1111-4111-8111-00000000b001";
+const PENCIL_BOX_TITLE = `${TITLE_AUTHOR_SEP}pencil-box`;
 
 let pencilState = {
   current: "honey",
   names: Object.fromEntries(PENCIL_STYLES.map((style) => [style, DEFAULT_PENCIL_NAME])),
 };
+let pencilCloudTimer = 0;
+let pencilCloudLock = false;
 
 export function isGamePaused() {
   return paused;
@@ -155,26 +159,117 @@ function els() {
   };
 }
 
+function isPencilBoxRecord(row) {
+  const id = String(row?.id || "");
+  const title = String(row?.title || "");
+  return id === PENCIL_BOX_ID || title === PENCIL_BOX_TITLE || title.startsWith(PENCIL_BOX_TITLE);
+}
+
+function applyPencilPayload(raw, { fillDefaults = false } = {}) {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  let changed = false;
+  if (PENCIL_STYLES.includes(raw.current) && raw.current !== pencilState.current) {
+    pencilState.current = raw.current;
+    changed = true;
+  }
+  const names = raw.names && typeof raw.names === "object" ? raw.names : {};
+  for (const style of PENCIL_STYLES) {
+    const name = String(names[style] || "").trim().slice(0, 10);
+    if (!name) {
+      if (fillDefaults && !pencilState.names[style]) {
+        pencilState.names[style] = DEFAULT_PENCIL_NAME;
+        changed = true;
+      }
+      continue;
+    }
+    if (name === DEFAULT_PENCIL_NAME && pencilState.names[style] && pencilState.names[style] !== DEFAULT_PENCIL_NAME) {
+      continue;
+    }
+    if (pencilState.names[style] !== name) {
+      pencilState.names[style] = name;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function hasCustomPencilNames() {
+  return PENCIL_STYLES.some((style) => pencilName(style) !== DEFAULT_PENCIL_NAME);
+}
+
 function loadPencilState() {
   try {
     const raw = JSON.parse(localStorage.getItem(PENCIL_STORE_KEY) || "null");
-    if (!raw || typeof raw !== "object") {
-      return;
-    }
-    if (PENCIL_STYLES.includes(raw.current)) {
-      pencilState.current = raw.current;
-    }
-    for (const style of PENCIL_STYLES) {
-      const name = String(raw.names?.[style] || "").trim();
-      pencilState.names[style] = name || DEFAULT_PENCIL_NAME;
-    }
+    applyPencilPayload(raw, { fillDefaults: true });
   } catch {
     /* keep defaults */
   }
 }
 
-function savePencilState() {
+function savePencilStateLocal() {
   localStorage.setItem(PENCIL_STORE_KEY, JSON.stringify(pencilState));
+}
+
+function savePencilState() {
+  savePencilStateLocal();
+  clearTimeout(pencilCloudTimer);
+  pencilCloudTimer = setTimeout(() => {
+    void persistPencilBox();
+  }, 250);
+}
+
+async function persistPencilBox() {
+  if (pencilCloudLock) {
+    return;
+  }
+  pencilCloudLock = true;
+  const payload = {
+    id: PENCIL_BOX_ID,
+    date: "pencil-box",
+    title: PENCIL_BOX_TITLE,
+    content: JSON.stringify(pencilState),
+  };
+  try {
+    await supabase.from("diaries").upsert(payload, { onConflict: "id" });
+  } catch {
+    /* local cache still holds the names */
+  }
+  pencilCloudLock = false;
+}
+
+async function syncPencilsFromCloud() {
+  try {
+    const { data, error } = await supabase
+      .from("diaries")
+      .select("id, title, content")
+      .eq("id", PENCIL_BOX_ID)
+      .maybeSingle();
+    if (error || !data) {
+      if (hasCustomPencilNames()) {
+        await persistPencilBox();
+      }
+      return;
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(data.content || "null");
+    } catch {
+      parsed = null;
+    }
+    applyPencilPayload(parsed, { fillDefaults: false });
+    savePencilStateLocal();
+    applyDockPencil();
+    if (els().caseBox && !els().caseBox.hidden) {
+      renderPencilCase();
+    }
+    if (hasCustomPencilNames()) {
+      await persistPencilBox();
+    }
+  } catch {
+    /* keep local names */
+  }
 }
 
 function pencilName(style) {
@@ -254,8 +349,13 @@ function startRenameTag(tag) {
     tag.removeEventListener("keydown", onKey);
     tag.contentEditable = "false";
     delete tag.dataset.editing;
-    const next = tag.textContent.replace(/\s+/g, " ").trim() || DEFAULT_PENCIL_NAME;
-    pencilState.names[style] = next.slice(0, 10);
+    if (!tag.isConnected) {
+      return;
+    }
+    const previous = pencilName(style);
+    const typed = tag.textContent.replace(/\s+/g, " ").trim();
+    const next = (typed || previous || DEFAULT_PENCIL_NAME).slice(0, 10);
+    pencilState.names[style] = next;
     savePencilState();
     applyDockPencil();
     if (els().caseBox && !els().caseBox.hidden) {
@@ -760,7 +860,17 @@ async function fetchEntries() {
       return [];
     }
 
-    cachedEntries = (data || []).map(normalizeEntry).filter(Boolean);
+    const pencilRow = (data || []).find(isPencilBoxRecord);
+    if (pencilRow?.content) {
+      try {
+        applyPencilPayload(JSON.parse(pencilRow.content), { fillDefaults: false });
+        savePencilStateLocal();
+        applyDockPencil();
+      } catch {
+        /* keep local names */
+      }
+    }
+    cachedEntries = (data || []).filter((row) => !isPencilBoxRecord(row)).map(normalizeEntry).filter(Boolean);
     setBusy(false, saving);
     setStatus("");
     return cachedEntries;
@@ -785,7 +895,7 @@ function scheduleSave() {
 
 async function persist(forced) {
   const state = forced || captureState();
-  if (loading || !state.date) {
+  if (loading || !state.date || state.id === PENCIL_BOX_ID) {
     return;
   }
   if (!state.id && !state.body.trim() && !isCustomTitle(state.title)) {
@@ -832,7 +942,7 @@ async function persist(forced) {
     return;
   }
 
-  const saved = normalizeEntry(data);
+  const saved = isPencilBoxRecord(data) ? null : normalizeEntry(data);
   if (saved) {
     if (editingId === state.id) {
       editingId = saved.id;
@@ -915,6 +1025,7 @@ export function initDiary() {
   loadPencilState();
   applyDockPencil();
   renderPencilCase();
+  void syncPencilsFromCloud();
 
   const { left, right, title } = els();
   left?.addEventListener("input", () => applyEdit("left"));

@@ -7,6 +7,7 @@ let saveTimer = 0;
 let editingId = null;
 let editingDate = "";
 let editingTitle = "";
+let editingAuthor = "";
 let content = "";
 let spreadIndex = 0;
 let loading = false;
@@ -21,6 +22,8 @@ let measureEl = null;
 
 const PENCIL_STYLES = ["honey", "cherry", "mint", "ocean", "grape"];
 const DEFAULT_PENCIL_NAME = "誰的筆";
+const DEFAULT_AUTHOR = "某個人";
+const TITLE_AUTHOR_SEP = "\u001f";
 const PENCIL_STORE_KEY = "pixel-room-pencils";
 
 let pencilState = {
@@ -63,6 +66,32 @@ function toIso(date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
+function packTitle(title, author) {
+  return `${title || ""}${TITLE_AUTHOR_SEP}${author || ""}`;
+}
+
+function unpackTitle(raw) {
+  const text = String(raw || "");
+  const at = text.indexOf(TITLE_AUTHOR_SEP);
+  if (at === -1) {
+    return { title: text.trim(), author: "" };
+  }
+  return {
+    title: text.slice(0, at).trim(),
+    author: text.slice(at + 1).trim(),
+  };
+}
+
+function currentAuthor() {
+  const name = pencilName(pencilState.current);
+  return !name || name === DEFAULT_PENCIL_NAME ? DEFAULT_AUTHOR : name;
+}
+
+function displayAuthor(author) {
+  const name = String(author || "").trim();
+  return !name || name === DEFAULT_PENCIL_NAME ? DEFAULT_AUTHOR : name;
+}
+
 function formatHead(iso) {
   const [year, month, day] = iso.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -83,10 +112,12 @@ function normalizeEntry(entry) {
     return null;
   }
   const parsed = parseEntryDate(entry);
+  const packed = unpackTitle(entry.title);
   return {
     id,
     date: toIso(parsed),
-    title: String(entry.title || "").trim(),
+    title: packed.title,
+    author: displayAuthor(packed.author),
     content: String(entry.content || entry.body || ""),
     created_at: entry.created_at || null,
   };
@@ -110,6 +141,7 @@ function els() {
     leftDate: document.getElementById("diary-left-date"),
     leftNum: document.getElementById("diary-left-num"),
     rightNum: document.getElementById("diary-right-num"),
+    rightAuthor: document.getElementById("diary-right-author"),
     tocLeft: document.getElementById("diary-toc-left"),
     tocRight: document.getElementById("diary-toc-right"),
     prev: document.getElementById("diary-prev"),
@@ -234,14 +266,15 @@ function startRenameTag(tag) {
   };
 
   const onKey = (event) => {
-    if (event.code === "Enter" || event.code === "Escape") {
+    if (event.key === "Enter" || event.code === "Enter" || event.code === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       tag.blur();
     }
   };
 
   tag.addEventListener("blur", finish);
-  tag.addEventListener("keydown", onKey);
+  tag.addEventListener("keydown", onKey, true);
 }
 
 let persistLock = false;
@@ -422,8 +455,8 @@ function isCustomTitle(value, body = "") {
   return !snippet || title !== snippet;
 }
 
-function localEntry(iso, id = null, body = "", title = "") {
-  return { id, date: iso, title, content: body };
+function localEntry(iso, id = null, body = "", title = "", author = "") {
+  return { id, date: iso, title, author: displayAuthor(author), content: body };
 }
 
 function currentEntry() {
@@ -461,6 +494,10 @@ function renderSpread() {
   }
   leftNum.textContent = String(spreadIndex * 2 + 1);
   rightNum.textContent = String(spreadIndex * 2 + 2);
+  const { rightAuthor } = els();
+  if (rightAuthor) {
+    rightAuthor.textContent = tocOpen ? "" : displayAuthor(editingAuthor);
+  }
   prev.disabled = tocOpen || spreadIndex <= 0;
   next.disabled = tocOpen || spreadIndex >= maxSpread(content);
   left.readOnly = tocOpen;
@@ -483,6 +520,7 @@ function entriesForToc() {
         id: "draft",
         date: editingDate || todayIso(),
         title: editingTitle,
+        author: displayAuthor(editingAuthor),
         content,
       });
     }
@@ -588,9 +626,15 @@ function renderToc() {
             entryBtn.dataset.diary = "toc-day";
             entryBtn.dataset.id = item.entry.id;
             entryBtn.dataset.date = item.entry.date;
-            entryBtn.textContent = isCustomTitle(item.entry.title, item.entry.content)
+            const titleSpan = document.createElement("span");
+            titleSpan.className = "diary-toc-entry-title";
+            titleSpan.textContent = isCustomTitle(item.entry.title, item.entry.content)
               ? item.entry.title.trim()
               : "無標題";
+            const authorSpan = document.createElement("span");
+            authorSpan.className = "diary-toc-entry-author";
+            authorSpan.textContent = displayAuthor(item.entry.author);
+            entryBtn.append(titleSpan, authorSpan);
             dayNest.append(entryBtn);
           }
           monthNest.append(dayNest);
@@ -665,6 +709,7 @@ function openDay(entry, nextSpread = 0) {
   editingId = entry.id;
   editingDate = entry.date;
   editingTitle = isCustomTitle(entry.title, entry.content) ? entry.title.trim() : "";
+  editingAuthor = displayAuthor(entry.author || currentAuthor());
   content = entry.content || "";
   spreadIndex = Math.max(0, Math.min(nextSpread, maxSpread(content)));
   renderSpread();
@@ -678,7 +723,7 @@ function openNewPage() {
   if (content.trim() || editingId || isCustomTitle(editingTitle)) {
     void persist();
   }
-  openDay(localEntry(todayIso()));
+  openDay(localEntry(todayIso(), null, "", "", currentAuthor()));
 }
 
 async function fetchEntries() {
@@ -745,7 +790,10 @@ async function persist() {
 
   const payload = {
     date: editingDate,
-    title: isCustomTitle(editingTitle) ? editingTitle.trim() : "",
+    title: packTitle(
+      isCustomTitle(editingTitle) ? editingTitle.trim() : "",
+      displayAuthor(editingAuthor || currentAuthor()),
+    ),
     content,
   };
 
@@ -853,6 +901,16 @@ export function initDiary() {
   const { left, right, title } = els();
   left?.addEventListener("input", () => applyEdit("left"));
   right?.addEventListener("input", () => applyEdit("right"));
+  title?.addEventListener("keydown", (event) => {
+    if (tocOpen || event.isComposing) {
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      els().left?.focus();
+      els().left?.setSelectionRange(0, 0);
+    }
+  });
   title?.addEventListener("focus", () => {
     if (tocOpen) {
       return;
@@ -919,6 +977,15 @@ export function initDiary() {
         pencilState.current = style;
         savePencilState();
         applyDockPencil();
+        if (!tocOpen) {
+          editingAuthor = currentAuthor();
+          const entry = cachedEntries.find((item) => item.id && item.id === editingId);
+          if (entry) {
+            entry.author = editingAuthor;
+            scheduleSave();
+          }
+          renderSpread();
+        }
       }
       closePencilUi();
     }
@@ -966,7 +1033,7 @@ export function initDiary() {
       if (entry) {
         openDay(entry);
       } else if (actionEl.dataset.id === "draft") {
-        openDay(localEntry(editingDate || todayIso(), null, content, editingTitle));
+        openDay(localEntry(editingDate || todayIso(), null, content, editingTitle, editingAuthor));
       }
     }
   });

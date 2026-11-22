@@ -16,7 +16,17 @@ let listRequest = 0;
 let cachedEntries = [];
 let expandedYears = new Set();
 let expandedMonths = new Set();
+let expandedDays = new Set();
 let measureEl = null;
+
+const PENCIL_STYLES = ["honey", "cherry", "mint", "ocean", "grape"];
+const DEFAULT_PENCIL_NAME = "誰的筆";
+const PENCIL_STORE_KEY = "pixel-room-pencils";
+
+let pencilState = {
+  current: "honey",
+  names: Object.fromEntries(PENCIL_STYLES.map((style) => [style, DEFAULT_PENCIL_NAME])),
+};
 
 export function isGamePaused() {
   return paused;
@@ -104,7 +114,134 @@ function els() {
     tocRight: document.getElementById("diary-toc-right"),
     prev: document.getElementById("diary-prev"),
     next: document.getElementById("diary-next"),
+    pencilMenu: document.getElementById("diary-pencil-menu"),
+    dockPencil: document.getElementById("diary-dock-pencil"),
+    dockTag: document.getElementById("diary-dock-tag"),
+    dockIcon: document.getElementById("diary-dock-icon"),
+    caseBox: document.getElementById("diary-case"),
+    caseTray: document.getElementById("diary-case-tray"),
   };
+}
+
+function loadPencilState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENCIL_STORE_KEY) || "null");
+    if (!raw || typeof raw !== "object") {
+      return;
+    }
+    if (PENCIL_STYLES.includes(raw.current)) {
+      pencilState.current = raw.current;
+    }
+    for (const style of PENCIL_STYLES) {
+      const name = String(raw.names?.[style] || "").trim();
+      pencilState.names[style] = name || DEFAULT_PENCIL_NAME;
+    }
+  } catch {
+    /* keep defaults */
+  }
+}
+
+function savePencilState() {
+  localStorage.setItem(PENCIL_STORE_KEY, JSON.stringify(pencilState));
+}
+
+function pencilName(style) {
+  const name = String(pencilState.names[style] || "").trim();
+  return name || DEFAULT_PENCIL_NAME;
+}
+
+function closePencilUi() {
+  const { pencilMenu, caseBox } = els();
+  if (pencilMenu) {
+    pencilMenu.hidden = true;
+  }
+  if (caseBox) {
+    caseBox.hidden = true;
+  }
+}
+
+function applyDockPencil() {
+  const { dockIcon, dockTag } = els();
+  const style = pencilState.current;
+  if (dockIcon) {
+    dockIcon.dataset.style = style;
+  }
+  if (dockTag) {
+    dockTag.dataset.style = style;
+    dockTag.textContent = pencilName(style);
+  }
+}
+
+function renderPencilCase() {
+  const { caseTray } = els();
+  if (!caseTray) {
+    return;
+  }
+  caseTray.replaceChildren();
+  for (const style of PENCIL_STYLES) {
+    const row = document.createElement("div");
+    row.className = "diary-case-row";
+    row.dataset.diary = "pick-pencil";
+    row.dataset.style = style;
+
+    const tag = document.createElement("span");
+    tag.className = "diary-name-tag";
+    tag.dataset.diary = "rename-tag";
+    tag.dataset.style = style;
+    tag.textContent = pencilName(style);
+
+    const icon = document.createElement("span");
+    icon.className = "diary-pencil-icon";
+    icon.dataset.style = style;
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML =
+      '<span class="eraser"></span><span class="ferrule"></span><span class="body"></span><span class="wood"></span><span class="lead"></span>';
+
+    row.append(tag, icon);
+    caseTray.append(row);
+  }
+}
+
+function startRenameTag(tag) {
+  if (!tag || tag.dataset.editing === "1") {
+    return;
+  }
+  const style = tag.dataset.style || pencilState.current;
+  tag.dataset.editing = "1";
+  tag.contentEditable = "true";
+  tag.textContent = pencilName(style);
+  tag.focus();
+  const range = document.createRange();
+  range.selectNodeContents(tag);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  const finish = () => {
+    tag.removeEventListener("blur", finish);
+    tag.removeEventListener("keydown", onKey);
+    tag.contentEditable = "false";
+    delete tag.dataset.editing;
+    const next = tag.textContent.replace(/\s+/g, " ").trim() || DEFAULT_PENCIL_NAME;
+    pencilState.names[style] = next.slice(0, 10);
+    savePencilState();
+    applyDockPencil();
+    if (els().caseBox && !els().caseBox.hidden) {
+      renderPencilCase();
+    } else {
+      tag.textContent = pencilName(style);
+    }
+  };
+
+  const onKey = (event) => {
+    if (event.code === "Enter" || event.code === "Escape") {
+      event.preventDefault();
+      tag.blur();
+    }
+  };
+
+  tag.addEventListener("blur", finish);
+  tag.addEventListener("keydown", onKey);
 }
 
 let persistLock = false;
@@ -301,7 +438,6 @@ function syncTitleInput() {
   const custom = isCustomTitle(editingTitle, content);
   title.value = custom ? editingTitle : "標題";
   title.classList.toggle("is-placeholder", !custom);
-  title.style.width = `${Math.max(2.2, [...title.value].length + 0.6)}em`;
 }
 
 function renderSpread() {
@@ -425,24 +561,39 @@ function renderToc() {
         const monthNest = document.createElement("div");
         monthNest.className = `diary-toc-nested${expandedMonths.has(key) ? " is-open" : ""}`;
         const days = months.get(month).sort((a, b) => b.date - a.date);
-        const seen = new Set();
+        const byDay = new Map();
         for (const item of days) {
-          const key = item.entry.id || item.entry.date;
-          if (seen.has(key)) {
-            continue;
+          const iso = item.entry.date;
+          if (!byDay.has(iso)) {
+            byDay.set(iso, []);
           }
-          seen.add(key);
+          byDay.get(iso).push(item);
+        }
+        for (const [iso, items] of byDay) {
+          const dayOpen = expandedDays.has(iso);
           const dayBtn = document.createElement("button");
           dayBtn.type = "button";
-          dayBtn.className = "diary-toc-day";
-          dayBtn.dataset.diary = "toc-day";
-          dayBtn.dataset.id = item.entry.id;
-          dayBtn.dataset.date = item.entry.date;
-          const dayLabel = `${item.date.getDate()}日`;
-          dayBtn.textContent = isCustomTitle(item.entry.title, item.entry.content)
-            ? `${dayLabel}　${item.entry.title.trim()}`
-            : dayLabel;
+          dayBtn.className = `diary-toc-day${dayOpen ? " is-open" : ""}`;
+          dayBtn.dataset.diary = "toc-day-toggle";
+          dayBtn.dataset.day = iso;
+          dayBtn.textContent = `${items[0].date.getDate()}日`;
           monthNest.append(dayBtn);
+
+          const dayNest = document.createElement("div");
+          dayNest.className = `diary-toc-nested${dayOpen ? " is-open" : ""}`;
+          for (const item of items) {
+            const entryBtn = document.createElement("button");
+            entryBtn.type = "button";
+            entryBtn.className = "diary-toc-entry";
+            entryBtn.dataset.diary = "toc-day";
+            entryBtn.dataset.id = item.entry.id;
+            entryBtn.dataset.date = item.entry.date;
+            entryBtn.textContent = isCustomTitle(item.entry.title, item.entry.content)
+              ? item.entry.title.trim()
+              : "無標題";
+            dayNest.append(entryBtn);
+          }
+          monthNest.append(dayNest);
         }
         yearNest.append(monthNest);
       }
@@ -459,6 +610,8 @@ function openToc() {
   const now = parseEntryDate(currentEntry());
   expandedYears.add(String(now.getFullYear()));
   expandedMonths.add(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
+  expandedDays.add(toIso(now));
+  closePencilUi();
   renderSpread();
 }
 
@@ -521,6 +674,7 @@ function openDay(entry, nextSpread = 0) {
 }
 
 function openNewPage() {
+  closePencilUi();
   if (content.trim() || editingId || isCustomTitle(editingTitle)) {
     void persist();
   }
@@ -692,6 +846,10 @@ export function initDiary() {
     return;
   }
 
+  loadPencilState();
+  applyDockPencil();
+  renderPencilCase();
+
   const { left, right, title } = els();
   left?.addEventListener("input", () => applyEdit("left"));
   right?.addEventListener("input", () => applyEdit("right"));
@@ -708,7 +866,6 @@ export function initDiary() {
   title?.addEventListener("input", () => {
     editingTitle = title.value;
     title.classList.toggle("is-placeholder", !isCustomTitle(editingTitle, content));
-    title.style.width = `${Math.max(2.2, [...title.value].length + 0.6)}em`;
     const entry = cachedEntries.find((item) => item.id && item.id === editingId);
     if (entry) {
       entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
@@ -722,6 +879,9 @@ export function initDiary() {
   });
 
   modal.addEventListener("click", (event) => {
+    if (!event.target.closest(".diary-pencil-dock, .diary-case")) {
+      closePencilUi();
+    }
     const actionEl = event.target.closest("[data-diary]");
     const action = actionEl?.dataset.diary;
     if (action === "close" || action === "backdrop") {
@@ -730,8 +890,50 @@ export function initDiary() {
     if (action === "toc") {
       openToc();
     }
+    if (action === "pencil-menu") {
+      const { pencilMenu, caseBox } = els();
+      const nextHidden = !pencilMenu.hidden;
+      closePencilUi();
+      pencilMenu.hidden = nextHidden;
+      if (caseBox) {
+        caseBox.hidden = true;
+      }
+    }
     if (action === "new") {
+      closePencilUi();
       openNewPage();
+    }
+    if (action === "switch-writer") {
+      const { pencilMenu, caseBox } = els();
+      if (pencilMenu) {
+        pencilMenu.hidden = true;
+      }
+      if (caseBox) {
+        renderPencilCase();
+        caseBox.hidden = false;
+      }
+    }
+    if (action === "pick-pencil") {
+      const style = actionEl.dataset.style;
+      if (PENCIL_STYLES.includes(style)) {
+        pencilState.current = style;
+        savePencilState();
+        applyDockPencil();
+      }
+      closePencilUi();
+    }
+    if (action === "rename-tag") {
+      event.stopPropagation();
+      startRenameTag(actionEl);
+    }
+    if (action === "toc-day-toggle") {
+      const day = actionEl.dataset.day;
+      if (expandedDays.has(day)) {
+        expandedDays.delete(day);
+      } else {
+        expandedDays.add(day);
+      }
+      renderToc();
     }
     if (action === "prev") {
       flip(-1);
@@ -775,6 +977,11 @@ export function initDiary() {
     }
     if (event.code === "Escape") {
       event.preventDefault();
+      const { pencilMenu, caseBox } = els();
+      if ((caseBox && !caseBox.hidden) || (pencilMenu && !pencilMenu.hidden)) {
+        closePencilUi();
+        return;
+      }
       if (tocOpen) {
         closeDiary();
         return;

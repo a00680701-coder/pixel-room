@@ -54,16 +54,29 @@
             </div>
           </div>
 
-          <button type="button" class="diary-pencil" data-diary="new" aria-label="寫新的一頁">
-            <span class="diary-pencil-icon" aria-hidden="true">
-              <span class="eraser"></span>
-              <span class="ferrule"></span>
-              <span class="body"></span>
-              <span class="wood"></span>
-              <span class="lead"></span>
-            </span>
-            <span class="diary-pencil-label">寫新的一頁</span>
-          </button>
+          <div class="diary-pencil-dock">
+            <div class="diary-pencil-menu" id="diary-pencil-menu" hidden>
+              <button type="button" data-diary="new">寫新的一頁</button>
+              <button type="button" data-diary="switch-writer">換人寫</button>
+            </div>
+            <div class="diary-pencil" id="diary-dock-pencil">
+              <span class="diary-name-tag" id="diary-dock-tag" data-diary="rename-tag">誰的筆</span>
+              <button type="button" class="diary-pencil-hit" data-diary="pencil-menu" aria-label="鉛筆選單">
+                <span class="diary-pencil-icon" id="diary-dock-icon" data-style="honey" aria-hidden="true">
+                  <span class="eraser"></span>
+                  <span class="ferrule"></span>
+                  <span class="body"></span>
+                  <span class="wood"></span>
+                  <span class="lead"></span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="diary-case" id="diary-case" hidden>
+            <p class="diary-case-title">鉛筆盒</p>
+            <div class="diary-case-tray" id="diary-case-tray"></div>
+          </div>
         </div>
 
         <p id="diary-status" class="diary-status" hidden></p>

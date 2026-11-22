@@ -657,10 +657,37 @@ function tocTree() {
   return years;
 }
 
+function isMobileToc() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function enableTitleSwipe(wrap) {
+  let startX = 0;
+  let dragged = false;
+  wrap.addEventListener("pointerdown", (event) => {
+    startX = event.clientX;
+    dragged = false;
+  });
+  wrap.addEventListener("scroll", () => {
+    dragged = true;
+  }, { passive: true });
+  wrap.addEventListener(
+    "click",
+    (event) => {
+      if (dragged || Math.abs(event.clientX - startX) > 8) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+}
+
 function renderToc() {
   const { tocLeft, tocRight } = els();
+  const single = isMobileToc();
   tocLeft.hidden = false;
-  tocRight.hidden = false;
+  tocRight.hidden = single;
   tocLeft.replaceChildren();
   tocRight.replaceChildren();
 
@@ -736,15 +763,19 @@ function renderToc() {
             entryBtn.dataset.diary = "toc-day";
             entryBtn.dataset.id = item.entry.id;
             entryBtn.dataset.date = item.entry.date;
+            const titleWrap = document.createElement("span");
+            titleWrap.className = "diary-toc-entry-title-wrap";
             const titleSpan = document.createElement("span");
             titleSpan.className = "diary-toc-entry-title";
             titleSpan.textContent = isCustomTitle(item.entry.title, item.entry.content)
               ? item.entry.title.trim()
               : "無標題";
+            titleWrap.append(titleSpan);
+            enableTitleSwipe(titleWrap);
             const authorSpan = document.createElement("span");
             authorSpan.className = "diary-toc-entry-author";
             authorSpan.textContent = displayAuthor(item.entry.author);
-            entryBtn.append(titleSpan, authorSpan);
+            entryBtn.append(titleWrap, authorSpan);
             dayNest.append(entryBtn);
           }
           monthNest.append(dayNest);
@@ -755,8 +786,12 @@ function renderToc() {
     }
   }
 
-  paint(tocLeft, leftYears);
-  paint(tocRight, rightYears);
+  if (single) {
+    paint(tocLeft, yearKeys);
+  } else {
+    paint(tocLeft, leftYears);
+    paint(tocRight, rightYears);
+  }
 }
 
 function openToc() {

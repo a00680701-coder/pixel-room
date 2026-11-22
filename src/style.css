@@ -484,20 +484,22 @@ body.diary-open {
 
 .diary-toc-pane {
   position: absolute;
-  inset: 16px 18px 32px;
+  inset: 0;
   z-index: 2;
+  padding: 16px 18px 12px;
   overflow: auto;
   background: #f4e6c6;
   color: var(--diary-ink);
   overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .diary-page-left .diary-toc-pane {
-  left: 28px;
+  padding-left: 28px;
 }
 
 .diary-page-right .diary-toc-pane {
-  right: 28px;
+  padding-right: 28px;
 }
 
 .diary-toc-title {
@@ -553,15 +555,33 @@ body.diary-open {
   font-size: 14px;
 }
 
-.diary-toc-entry-title {
+.diary-toc-entry-title-wrap {
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.diary-toc-entry-title-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.diary-toc-entry-title {
+  display: inline-block;
+  min-width: 100%;
   white-space: nowrap;
 }
 
 .diary-toc-entry-author {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
+  padding-left: 8px;
+  background: #f4e6c6;
   color: #8a6244;
   font-size: 12px;
 }
@@ -584,6 +604,10 @@ body.diary-open {
 
 .diary-toc-nested.is-open {
   display: block;
+}
+
+.diary-book.is-toc .diary-page {
+  background-image: none;
 }
 
 .diary-book.is-toc .diary-lines,
@@ -923,6 +947,7 @@ body.diary-open {
 
   .diary-stage {
     font-size: 13px;
+    width: min(96vw, 920px);
   }
 
   .diary-page {
@@ -939,5 +964,37 @@ body.diary-open {
 
   .diary-bookmark {
     left: 16px;
+  }
+
+  .diary-book.is-toc {
+    grid-template-columns: 1fr;
+  }
+
+  .diary-book.is-toc .diary-spine,
+  .diary-book.is-toc .diary-page-right {
+    display: none;
+  }
+
+  .diary-book.is-toc .diary-page-left {
+    padding: 12px 14px 10px;
+    box-shadow: none;
+  }
+
+  .diary-page-left .diary-toc-pane,
+  .diary-page-right .diary-toc-pane {
+    padding: 14px 16px 12px;
+  }
+
+  .diary-toc-month {
+    padding-left: 10px;
+  }
+
+  .diary-toc-day {
+    padding-left: 20px;
+  }
+
+  .diary-toc-entry {
+    padding-left: 28px;
+    gap: 8px;
   }
 }

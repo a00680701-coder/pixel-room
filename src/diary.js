@@ -278,7 +278,17 @@ function startRenameTag(tag) {
 }
 
 let persistLock = false;
-let persistQueued = false;
+let persistQueue = [];
+
+function captureState() {
+  return {
+    id: editingId,
+    date: editingDate,
+    title: editingTitle,
+    author: editingAuthor,
+    body: content,
+  };
+}
 
 function setStatus(message, kind = "info") {
   const { status } = els();
@@ -720,10 +730,11 @@ function openDay(entry, nextSpread = 0) {
 
 function openNewPage() {
   closePencilUi();
-  if (content.trim() || editingId || isCustomTitle(editingTitle)) {
-    void persist();
-  }
+  const previous = captureState();
   openDay(localEntry(todayIso(), null, "", "", currentAuthor()));
+  if (previous.id || previous.body.trim() || isCustomTitle(previous.title)) {
+    void persist(previous);
+  }
 }
 
 async function fetchEntries() {
@@ -772,15 +783,16 @@ function scheduleSave() {
   }, 700);
 }
 
-async function persist() {
-  if (loading || !editingDate) {
+async function persist(forced) {
+  const state = forced || captureState();
+  if (loading || !state.date) {
     return;
   }
-  if (!editingId && !content.trim() && !isCustomTitle(editingTitle)) {
+  if (!state.id && !state.body.trim() && !isCustomTitle(state.title)) {
     return;
   }
   if (persistLock) {
-    persistQueued = true;
+    persistQueue.push(state);
     return;
   }
 
@@ -789,16 +801,16 @@ async function persist() {
   setStatus("儲存中…");
 
   const payload = {
-    date: editingDate,
+    date: state.date,
     title: packTitle(
-      isCustomTitle(editingTitle) ? editingTitle.trim() : "",
-      displayAuthor(editingAuthor || currentAuthor()),
+      isCustomTitle(state.title) ? state.title.trim() : "",
+      displayAuthor(state.author || currentAuthor()),
     ),
-    content,
+    content: state.body,
   };
 
-  const query = editingId
-    ? supabase.from("diaries").update(payload).eq("id", editingId).select("id, created_at, date, title, content").single()
+  const query = state.id
+    ? supabase.from("diaries").update(payload).eq("id", state.id).select("id, created_at, date, title, content").single()
     : supabase.from("diaries").insert(payload).select("id, created_at, date, title, content").single();
 
   let data;
@@ -812,19 +824,25 @@ async function persist() {
   saving = false;
   persistLock = false;
   if (error || !data) {
-    setStatus(`儲存失敗：${reportDiaryError(editingId ? "update" : "insert", error || "沒有回傳資料")}`, "error");
+    setStatus(`儲存失敗：${reportDiaryError(state.id ? "update" : "insert", error || "沒有回傳資料")}`, "error");
+    const nextFailed = persistQueue.shift();
+    if (nextFailed) {
+      await persist(nextFailed);
+    }
     return;
   }
 
   const saved = normalizeEntry(data);
   if (saved) {
-    editingId = saved.id;
+    if (editingId === state.id) {
+      editingId = saved.id;
+    }
     cachedEntries = [saved, ...cachedEntries.filter((entry) => entry.id !== saved.id)];
   }
   setStatus("");
-  if (persistQueued) {
-    persistQueued = false;
-    await persist();
+  const next = persistQueue.shift();
+  if (next) {
+    await persist(next);
   }
 }
 

@@ -43,11 +43,11 @@ k.debug.inspect = false;
 k.debug.showLog = false;
 
 k.loadSprite("goose", "/assets/goose.png", { singular: true });
-k.loadSprite("cabinet", "/assets/cabinet.png", { singular: true });
-k.loadSprite("bookcase", "/assets/bookcase.png?v=6", { singular: true });
-k.loadSprite("bush", "/assets/bush.png?v=2", { singular: true });
-k.loadSprite("palm", "/assets/palm.png?v=2", { singular: true });
-k.loadSprite("window", "/assets/window.png", { singular: true });
+k.loadSprite("cabinet", "/assets/cabinet.png?v=3", { singular: true });
+k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
+k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
+k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=3", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -55,8 +55,8 @@ k.loadSprite("wall-n-r", "/assets/wall-n-r.png", { singular: true });
 k.loadSprite("wall-base", "/assets/wall-base.png", { singular: true });
 k.loadSprite("wall-base-l", "/assets/wall-base-l.png", { singular: true });
 k.loadSprite("wall-base-r", "/assets/wall-base-r.png", { singular: true });
-k.loadSprite("desk", "/assets/desk.png?v=2", { singular: true });
-k.loadSprite("record-player", "/assets/record-player.png?v=2", { singular: true });
+k.loadSprite("desk", "/assets/desk.png?v=3", { singular: true });
+k.loadSprite("record-player", "/assets/record-player.png?v=3", { singular: true });
 
 function snapCam() {
   const cam = k.camPos();
@@ -78,11 +78,21 @@ function addBlock(x, y, w, h) {
   ]);
 }
 
-function addSolid(name, x, y, hit, prompt, kind) {
-  const bottom = y + hit.y + hit.h;
+function ipohHour() {
+  const hour = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kuala_Lumpur",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).find((part) => part.type === "hour");
+  return Number(hour?.value ?? 0);
+}
+
+function addSolid(name, x, y, hit, prompt, kind, scale = 1) {
+  const bottom = y + (hit.y + hit.h) * scale;
   const comps = [
     k.sprite(name),
     k.pos(x, y),
+    k.scale(scale),
     k.area({
       shape: new k.Rect(k.vec2(hit.x, hit.y), hit.w, hit.h),
     }),
@@ -175,11 +185,97 @@ k.scene("room", () => {
   addBlock(GAME_SIZE - TILE, 0, TILE, GAME_SIZE);
   addBlock(0, GAME_SIZE - TILE, GAME_SIZE, TILE);
 
-  k.add([k.sprite("window"), k.pos(112, 8), k.z(3)]);
-  k.add([k.sprite("window"), k.pos(128, 8), k.z(3)]);
+  const WIN_W = 24;
+  const WIN_H = 22;
+  const WIN_Y = 6;
+  const WIN_XS = [100, 128];
+  const GLASS = WIN_XS.map((x) => ({
+    x: x + 3,
+    y: WIN_Y + 2,
+    w: WIN_W - 6,
+    h: 12,
+  }));
 
-  addSolid("cabinet", 16, 10, { x: 8, y: 54, w: 32, h: 18 }, "衣櫃裡疊著換季的衣服。");
-  addSolid("bookcase", 192, 24, { x: 2, y: 28, w: 28, h: 10 }, "書櫃上排滿舊筆記與繪本。");
+  const skyPanes = GLASS.map((glass) =>
+    k.add([
+      k.rect(glass.w, glass.h),
+      k.pos(glass.x, glass.y),
+      k.color(120, 180, 220),
+      k.z(2),
+    ]),
+  );
+
+  const sun = k.add([
+    k.rect(5, 5),
+    k.pos(0, 0),
+    k.color(255, 214, 74),
+    k.outline(1, k.rgb(196, 132, 40)),
+    k.z(2.4),
+    k.opacity(0),
+  ]);
+  const moon = k.add([
+    k.rect(5, 5),
+    k.pos(0, 0),
+    k.color(232, 236, 246),
+    k.outline(1, k.rgb(164, 172, 196)),
+    k.z(2.4),
+    k.opacity(0),
+  ]);
+
+  function skyTone(hour) {
+    if (hour >= 6 && hour < 8) {
+      return [255, 176, 120];
+    }
+    if (hour >= 8 && hour < 16) {
+      return [126, 188, 230];
+    }
+    if (hour >= 16 && hour < 18) {
+      return [236, 128, 86];
+    }
+    return [28, 34, 62];
+  }
+
+  function bodyInGlass(x, y) {
+    return GLASS.some(
+      (glass) => x >= glass.x && x <= glass.x + glass.w - 5 && y >= glass.y && y <= glass.y + glass.h - 5,
+    );
+  }
+
+  function updateSky() {
+    const hour = ipohHour();
+    const tone = skyTone(hour);
+    for (const pane of skyPanes) {
+      pane.color = k.rgb(tone[0], tone[1], tone[2]);
+    }
+    const span0 = GLASS[0].x;
+    const span1 = GLASS[1].x + GLASS[1].w - 5;
+    const day = hour >= 6 && hour < 18;
+    const t = day ? (hour - 6) / 12 : ((hour + 6) % 24) / 12;
+    const x = Math.round(span0 + t * (span1 - span0));
+    const y = Math.round(WIN_Y + 4 - Math.sin(t * Math.PI) * 3);
+    const visible = bodyInGlass(x, y);
+    sun.pos = k.vec2(x, y);
+    moon.pos = k.vec2(x, y);
+    sun.opacity = day && visible ? 1 : 0;
+    moon.opacity = !day && visible ? 1 : 0;
+  }
+
+  updateSky();
+  let lastHour = ipohHour();
+  k.onUpdate(() => {
+    const hour = ipohHour();
+    if (hour !== lastHour) {
+      lastHour = hour;
+      updateSky();
+    }
+  });
+
+  for (const x of WIN_XS) {
+    k.add([k.sprite("window"), k.pos(x, WIN_Y), k.z(3)]);
+  }
+
+  addSolid("cabinet", 18, 16, { x: 4, y: 48, w: 40, h: 14 }, "衣櫃裡疊著換季的衣服。");
+  addSolid("bookcase", 184, 16, { x: 2, y: 28, w: 28, h: 10 }, "書櫃上排滿舊筆記與繪本。", null, 1.4);
 
   addSolid("palm", 22, 174, { x: 3, y: 24, w: 13, h: 8 });
   addSolid("bush", 204, 175, { x: 6, y: 24, w: 12, h: 8 });
@@ -189,14 +285,15 @@ k.scene("room", () => {
 
   addSolid(
     "desk",
-    22,
-    104,
+    20,
+    98,
     { x: 1, y: 13, w: 26, h: 8 },
     "打開桌上的日記。",
     "diary",
+    1.4,
   );
 
-  addSolid("record-player", 184, 118, { x: 2, y: 19, w: 20, h: 8 }, "唱片機輕輕轉了一下，發出沙沙聲。");
+  addSolid("record-player", 174, 108, { x: 2, y: 19, w: 20, h: 8 }, "唱片機輕輕轉了一下，發出沙沙聲。", null, 1.4);
 
   const player = k.add([
     k.pos(GAME_SIZE / 2, 148),

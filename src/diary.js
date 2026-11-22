@@ -6,6 +6,7 @@ let closeTimer = 0;
 let saveTimer = 0;
 let editingId = null;
 let editingDate = "";
+let editingTitle = "";
 let content = "";
 let spreadIndex = 0;
 let loading = false;
@@ -95,8 +96,8 @@ function els() {
     status: document.getElementById("diary-status"),
     left: document.getElementById("diary-left"),
     right: document.getElementById("diary-right"),
-    leftHead: document.getElementById("diary-left-head"),
-    rightHead: document.getElementById("diary-right-head"),
+    title: document.getElementById("diary-title"),
+    leftDate: document.getElementById("diary-left-date"),
     leftNum: document.getElementById("diary-left-num"),
     rightNum: document.getElementById("diary-right-num"),
     tocLeft: document.getElementById("diary-toc-left"),
@@ -275,16 +276,36 @@ function maxSpread(text) {
   return isSpreadFull(text, last) ? last + 1 : last;
 }
 
-function localEntry(iso, id = null, body = "") {
-  return { id, date: iso, title: "", content: body };
+function isCustomTitle(value, body = "") {
+  const title = String(value || "").trim();
+  if (!title || title === "標題") {
+    return false;
+  }
+  const snippet = String(body || "").trim().slice(0, 40);
+  return !snippet || title !== snippet;
+}
+
+function localEntry(iso, id = null, body = "", title = "") {
+  return { id, date: iso, title, content: body };
 }
 
 function currentEntry() {
   return cachedEntries.find((entry) => entry.date === editingDate) || localEntry(editingDate, editingId, content);
 }
 
+function syncTitleInput() {
+  const { title } = els();
+  if (!title || document.activeElement === title) {
+    return;
+  }
+  const custom = isCustomTitle(editingTitle, content);
+  title.value = custom ? editingTitle : "標題";
+  title.classList.toggle("is-placeholder", !custom);
+  title.style.width = `${Math.max(2.2, [...title.value].length + 0.6)}em`;
+}
+
 function renderSpread() {
-  const { left, right, leftHead, rightHead, leftNum, rightNum, prev, next, book } = els();
+  const { left, right, title, leftDate, leftNum, rightNum, prev, next, book } = els();
   if (!left || !right) {
     return;
   }
@@ -292,12 +313,16 @@ function renderSpread() {
   book?.classList.toggle("is-toc", tocOpen);
   els().bookmark?.classList.toggle("is-on", tocOpen);
 
-  const dateLabel = formatHead(editingDate || todayIso());
-  const { pages, left: leftPage, right: rightPage } = spreadRange(content, spreadIndex);
+  const { left: leftPage, right: rightPage } = spreadRange(content, spreadIndex);
   left.value = leftPage ? content.slice(leftPage.start, leftPage.end) : "";
   right.value = rightPage ? content.slice(rightPage.start, rightPage.end) : "";
-  leftHead.textContent = tocOpen ? "目錄" : dateLabel;
-  rightHead.textContent = tocOpen ? "" : spreadIndex === 0 ? "日記" : "續";
+  if (leftDate) {
+    leftDate.textContent = tocOpen ? "" : formatHead(editingDate || todayIso());
+  }
+  syncTitleInput();
+  if (title) {
+    title.readOnly = tocOpen;
+  }
   leftNum.textContent = String(spreadIndex * 2 + 1);
   rightNum.textContent = String(spreadIndex * 2 + 2);
   prev.disabled = tocOpen || spreadIndex <= 0;
@@ -315,13 +340,16 @@ function renderSpread() {
 
 function entriesForToc() {
   const list = [...cachedEntries];
-  if (editingDate && !list.some((entry) => entry.date === editingDate)) {
-    list.push({
-      id: editingId || "draft",
-      date: editingDate,
-      title: "",
-      content,
-    });
+  const hasDraft = Boolean(content.trim() || isCustomTitle(editingTitle));
+  if (hasDraft && !list.some((entry) => entry.id && entry.id === editingId)) {
+    if (!editingId) {
+      list.push({
+        id: "draft",
+        date: editingDate || todayIso(),
+        title: editingTitle,
+        content,
+      });
+    }
   }
   return list;
 }
@@ -399,16 +427,21 @@ function renderToc() {
         const days = months.get(month).sort((a, b) => b.date - a.date);
         const seen = new Set();
         for (const item of days) {
-          if (seen.has(item.entry.date)) {
+          const key = item.entry.id || item.entry.date;
+          if (seen.has(key)) {
             continue;
           }
-          seen.add(item.entry.date);
+          seen.add(key);
           const dayBtn = document.createElement("button");
           dayBtn.type = "button";
           dayBtn.className = "diary-toc-day";
           dayBtn.dataset.diary = "toc-day";
+          dayBtn.dataset.id = item.entry.id;
           dayBtn.dataset.date = item.entry.date;
-          dayBtn.textContent = `${item.date.getDate()}日`;
+          const dayLabel = `${item.date.getDate()}日`;
+          dayBtn.textContent = isCustomTitle(item.entry.title, item.entry.content)
+            ? `${dayLabel}　${item.entry.title.trim()}`
+            : dayLabel;
           monthNest.append(dayBtn);
         }
         yearNest.append(monthNest);
@@ -429,11 +462,6 @@ function openToc() {
   renderSpread();
 }
 
-function closeToc() {
-  tocOpen = false;
-  renderSpread();
-}
-
 function applyEdit(side) {
   const { left, right } = els();
   const caret = side === "left" ? left.selectionStart : right.selectionStart;
@@ -451,9 +479,10 @@ function applyEdit(side) {
   }
 
   content = next;
-  const entry = cachedEntries.find((item) => item.date === editingDate);
+  const entry = cachedEntries.find((item) => item.id && item.id === editingId);
   if (entry) {
     entry.content = content;
+    entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
   }
   renderSpread();
 
@@ -478,20 +507,24 @@ function applyEdit(side) {
   scheduleSave();
 }
 
-function emptyToday() {
-  return localEntry(todayIso());
-}
-
 function openDay(entry, nextSpread = 0) {
   tocOpen = false;
   editingId = entry.id;
   editingDate = entry.date;
+  editingTitle = isCustomTitle(entry.title, entry.content) ? entry.title.trim() : "";
   content = entry.content || "";
   spreadIndex = Math.max(0, Math.min(nextSpread, maxSpread(content)));
   renderSpread();
   if (!loading) {
     els().left?.focus();
   }
+}
+
+function openNewPage() {
+  if (content.trim() || editingId || isCustomTitle(editingTitle)) {
+    void persist();
+  }
+  openDay(localEntry(todayIso()));
 }
 
 async function fetchEntries() {
@@ -513,7 +546,7 @@ async function fetchEntries() {
       setBusy(false, saving);
       setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
       cachedEntries = [];
-      openDay(emptyToday());
+      openToc();
       return [];
     }
 
@@ -528,7 +561,7 @@ async function fetchEntries() {
     setBusy(false, saving);
     setStatus(`讀取失敗：${reportDiaryError("select", error)}`, "error");
     cachedEntries = [];
-    openDay(emptyToday());
+    openToc();
     return [];
   }
 }
@@ -544,7 +577,7 @@ async function persist() {
   if (loading || !editingDate) {
     return;
   }
-  if (!editingId && !content.trim()) {
+  if (!editingId && !content.trim() && !isCustomTitle(editingTitle)) {
     return;
   }
   if (persistLock) {
@@ -558,7 +591,7 @@ async function persist() {
 
   const payload = {
     date: editingDate,
-    title: content.trim().slice(0, 40),
+    title: isCustomTitle(editingTitle) ? editingTitle.trim() : "",
     content,
   };
 
@@ -584,7 +617,7 @@ async function persist() {
   const saved = normalizeEntry(data);
   if (saved) {
     editingId = saved.id;
-    cachedEntries = [saved, ...cachedEntries.filter((entry) => entry.id !== saved.id && entry.date !== saved.date)];
+    cachedEntries = [saved, ...cachedEntries.filter((entry) => entry.id !== saved.id)];
   }
   setStatus("");
   if (persistQueued) {
@@ -600,23 +633,22 @@ export function openDiary() {
   }
 
   clearTimeout(closeTimer);
-  tocOpen = false;
+  tocOpen = true;
   spreadIndex = 0;
   content = "";
   editingId = null;
-  editingDate = todayIso();
+  editingDate = "";
+  editingTitle = "";
   modal.hidden = false;
   modal.inert = false;
   requestAnimationFrame(() => {
     modal.classList.add("open");
-    renderSpread();
+    openToc();
   });
   setPaused(true);
 
-  void fetchEntries().then((entries) => {
-    const today = todayIso();
-    const match = entries.find((entry) => entry.date === today);
-    openDay(match || emptyToday());
+  void fetchEntries().then(() => {
+    openToc();
   });
 }
 
@@ -628,7 +660,7 @@ export function closeDiary() {
 
   listRequest += 1;
   clearTimeout(saveTimer);
-  if (content.trim() || editingId) {
+  if (content.trim() || editingId || isCustomTitle(editingTitle)) {
     void persist();
   }
   loading = false;
@@ -660,9 +692,34 @@ export function initDiary() {
     return;
   }
 
-  const { left, right } = els();
+  const { left, right, title } = els();
   left?.addEventListener("input", () => applyEdit("left"));
   right?.addEventListener("input", () => applyEdit("right"));
+  title?.addEventListener("focus", () => {
+    if (tocOpen) {
+      return;
+    }
+    if (!isCustomTitle(editingTitle)) {
+      title.value = "標題";
+      title.classList.remove("is-placeholder");
+      requestAnimationFrame(() => title.select());
+    }
+  });
+  title?.addEventListener("input", () => {
+    editingTitle = title.value;
+    title.classList.toggle("is-placeholder", !isCustomTitle(editingTitle, content));
+    title.style.width = `${Math.max(2.2, [...title.value].length + 0.6)}em`;
+    const entry = cachedEntries.find((item) => item.id && item.id === editingId);
+    if (entry) {
+      entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
+    }
+    scheduleSave();
+  });
+  title?.addEventListener("blur", () => {
+    editingTitle = isCustomTitle(title.value) ? title.value.trim() : "";
+    syncTitleInput();
+    scheduleSave();
+  });
 
   modal.addEventListener("click", (event) => {
     const actionEl = event.target.closest("[data-diary]");
@@ -671,11 +728,10 @@ export function initDiary() {
       closeDiary();
     }
     if (action === "toc") {
-      if (tocOpen) {
-        closeToc();
-      } else {
-        openToc();
-      }
+      openToc();
+    }
+    if (action === "new") {
+      openNewPage();
     }
     if (action === "prev") {
       flip(-1);
@@ -702,9 +758,13 @@ export function initDiary() {
       renderToc();
     }
     if (action === "toc-day") {
-      const entry = cachedEntries.find((item) => item.date === actionEl.dataset.date);
+      const entry =
+        cachedEntries.find((item) => item.id && item.id === actionEl.dataset.id) ||
+        cachedEntries.find((item) => item.date === actionEl.dataset.date);
       if (entry) {
         openDay(entry);
+      } else if (actionEl.dataset.id === "draft") {
+        openDay(localEntry(editingDate || todayIso(), null, content, editingTitle));
       }
     }
   });
@@ -716,10 +776,10 @@ export function initDiary() {
     if (event.code === "Escape") {
       event.preventDefault();
       if (tocOpen) {
-        closeToc();
+        closeDiary();
         return;
       }
-      closeDiary();
+      openToc();
     }
     if (tocOpen || event.target?.closest?.(".diary-lines")) {
       return;

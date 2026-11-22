@@ -296,6 +296,7 @@ body.diary-open {
 .diary-book-wrap {
   position: relative;
   padding-top: 10px;
+  padding-bottom: 52px;
 }
 
 .diary-bookmark {
@@ -371,16 +372,49 @@ body.diary-open {
   box-shadow: inset 18px 0 22px rgba(80, 50, 20, 0.1);
 }
 
-.diary-page-head {
+.diary-page-head,
+.diary-page-spacer {
   flex: 0 0 var(--diary-line);
   height: var(--diary-line);
   margin: 0;
+}
+
+.diary-page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  color: #7a4e2e;
+  overflow: hidden;
+}
+
+.diary-title {
+  flex: 0 1 auto;
+  width: 3em;
+  min-width: 2em;
+  max-width: 58%;
+  height: var(--diary-line);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--diary-ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: var(--diary-line);
+  letter-spacing: 0.04em;
+  outline: none;
+}
+
+.diary-title.is-placeholder {
+  color: #8a6248;
+}
+
+.diary-head-date {
+  flex: 0 0 auto;
   color: #7a4e2e;
   font-size: 12px;
-  letter-spacing: 0.08em;
-  overflow: hidden;
+  letter-spacing: 0.06em;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .diary-lines,
@@ -502,8 +536,109 @@ body.diary-open {
 
 .diary-book.is-toc .diary-lines,
 .diary-book.is-toc .diary-page-num,
-.diary-book.is-toc .diary-page-head {
+.diary-book.is-toc .diary-page-head,
+.diary-book.is-toc .diary-page-spacer {
   visibility: hidden;
+}
+
+.diary-pencil {
+  position: absolute;
+  right: 18px;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diary-pencil-label {
+  position: absolute;
+  right: 0;
+  bottom: 22px;
+  opacity: 0;
+  transform: translateY(4px);
+  color: #f4ead2;
+  font: 12px/1 ui-monospace, "Cascadia Mono", monospace;
+  letter-spacing: 0.08em;
+  text-shadow: 1px 1px 0 #1a1210;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.diary-pencil-icon {
+  display: flex;
+  align-items: stretch;
+  width: 92px;
+  height: 14px;
+  filter: drop-shadow(2px 2px 0 #1a1210);
+  transform-origin: 70% 50%;
+  transition: transform 0.2s ease;
+}
+
+.diary-pencil-icon .eraser {
+  width: 12px;
+  background: #d8899a;
+  border-radius: 2px 0 0 2px;
+}
+
+.diary-pencil-icon .ferrule {
+  width: 10px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #c9c3b4 0 2px,
+      #9d9788 2px 3px
+    );
+}
+
+.diary-pencil-icon .body {
+  flex: 1;
+  background: linear-gradient(180deg, #f0d36a 0%, #d7a43a 48%, #b8862a 100%);
+}
+
+.diary-pencil-icon .wood {
+  width: 12px;
+  background: linear-gradient(180deg, #e8c8a0 0%, #c99562 100%);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.diary-pencil-icon .lead {
+  width: 7px;
+  margin-left: -1px;
+  background: #2a2420;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.diary-pencil:hover .diary-pencil-label,
+.diary-pencil:focus-visible .diary-pencil-label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.diary-pencil:hover .diary-pencil-icon,
+.diary-pencil:focus-visible .diary-pencil-icon {
+  animation: diary-pencil-wiggle 0.55s ease;
+}
+
+@keyframes diary-pencil-wiggle {
+  0% {
+    transform: rotate(0deg) translateY(0);
+  }
+  30% {
+    transform: rotate(-8deg) translateY(-3px);
+  }
+  55% {
+    transform: rotate(5deg) translateY(-1px);
+  }
+  100% {
+    transform: rotate(-2deg) translateY(-2px);
+  }
 }
 
 .diary-book.is-busy .diary-lines {

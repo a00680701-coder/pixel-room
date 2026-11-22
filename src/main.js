@@ -47,7 +47,7 @@ k.loadSprite("cabinet", "/assets/cabinet.png?v=3", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=3", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=4", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -185,40 +185,43 @@ k.scene("room", () => {
   addBlock(GAME_SIZE - TILE, 0, TILE, GAME_SIZE);
   addBlock(0, GAME_SIZE - TILE, GAME_SIZE, TILE);
 
-  const WIN_W = 24;
-  const WIN_H = 22;
-  const WIN_Y = 6;
-  const WIN_XS = [100, 128];
+  const WIN_SCALE = 1.5;
+  const WIN_W = 22 * WIN_SCALE;
+  const WIN_Y = 2;
+  const WIN_XS = [94, 130];
+  const BODY = 6;
   const GLASS = WIN_XS.map((x) => ({
-    x: x + 3,
-    y: WIN_Y + 2,
-    w: WIN_W - 6,
-    h: 12,
+    x: x + 2 * WIN_SCALE,
+    y: WIN_Y + 2 * WIN_SCALE,
+    w: 18 * WIN_SCALE,
+    h: 12 * WIN_SCALE,
   }));
+
+  for (const x of WIN_XS) {
+    k.add([k.sprite("window"), k.pos(x, WIN_Y), k.scale(WIN_SCALE), k.z(3)]);
+  }
 
   const skyPanes = GLASS.map((glass) =>
     k.add([
       k.rect(glass.w, glass.h),
       k.pos(glass.x, glass.y),
       k.color(120, 180, 220),
-      k.z(2),
+      k.z(4),
     ]),
   );
 
   const sun = k.add([
-    k.rect(5, 5),
+    k.rect(BODY, BODY),
     k.pos(0, 0),
     k.color(255, 214, 74),
-    k.outline(1, k.rgb(196, 132, 40)),
-    k.z(2.4),
+    k.z(4.1),
     k.opacity(0),
   ]);
   const moon = k.add([
-    k.rect(5, 5),
+    k.rect(BODY, BODY),
     k.pos(0, 0),
-    k.color(232, 236, 246),
-    k.outline(1, k.rgb(164, 172, 196)),
-    k.z(2.4),
+    k.color(240, 244, 255),
+    k.z(4.1),
     k.opacity(0),
   ]);
 
@@ -237,7 +240,11 @@ k.scene("room", () => {
 
   function bodyInGlass(x, y) {
     return GLASS.some(
-      (glass) => x >= glass.x && x <= glass.x + glass.w - 5 && y >= glass.y && y <= glass.y + glass.h - 5,
+      (glass) =>
+        x >= glass.x &&
+        x <= glass.x + glass.w - BODY &&
+        y >= glass.y &&
+        y <= glass.y + glass.h - BODY,
     );
   }
 
@@ -248,11 +255,13 @@ k.scene("room", () => {
       pane.color = k.rgb(tone[0], tone[1], tone[2]);
     }
     const span0 = GLASS[0].x;
-    const span1 = GLASS[1].x + GLASS[1].w - 5;
+    const span1 = GLASS[1].x + GLASS[1].w - BODY;
     const day = hour >= 6 && hour < 18;
     const t = day ? (hour - 6) / 12 : ((hour + 6) % 24) / 12;
     const x = Math.round(span0 + t * (span1 - span0));
-    const y = Math.round(WIN_Y + 4 - Math.sin(t * Math.PI) * 3);
+    const yLow = GLASS[0].y + GLASS[0].h - BODY - 1;
+    const yHigh = GLASS[0].y + 1;
+    const y = Math.round(yLow - Math.sin(t * Math.PI) * (yLow - yHigh));
     const visible = bodyInGlass(x, y);
     sun.pos = k.vec2(x, y);
     moon.pos = k.vec2(x, y);
@@ -269,10 +278,6 @@ k.scene("room", () => {
       updateSky();
     }
   });
-
-  for (const x of WIN_XS) {
-    k.add([k.sprite("window"), k.pos(x, WIN_Y), k.z(3)]);
-  }
 
   addSolid("cabinet", 18, 16, { x: 4, y: 48, w: 40, h: 14 }, "衣櫃裡疊著換季的衣服。");
   addSolid("bookcase", 184, 16, { x: 2, y: 28, w: 28, h: 10 }, "書櫃上排滿舊筆記與繪本。", null, 1.4);

@@ -42,10 +42,10 @@ const PLANTS_BOX_ID = "c0ffee00-1111-4111-8111-00000000b002";
 const PLANTS_BOX_TITLE = "\u001fplant-box";
 const DEFAULT_PLANTS = [
   { id: "plant-1", name: "palm", x: 22, y: 174, hit: { x: 3, y: 24, w: 13, h: 8 } },
-  { id: "plant-2", name: "bush", x: 204, y: 175, hit: { x: 6, y: 24, w: 12, h: 8 } },
+  { id: "plant-2", name: "bush", x: 70, y: 175, hit: { x: 6, y: 24, w: 12, h: 8 } },
   { id: "plant-3", name: "bush", x: 68, y: 33, hit: { x: 6, y: 24, w: 12, h: 8 } },
   { id: "plant-4", name: "palm", x: 148, y: 68, hit: { x: 3, y: 24, w: 13, h: 8 } },
-  { id: "plant-5", name: "bush", x: 112, y: 195, hit: { x: 6, y: 24, w: 12, h: 8 } },
+  { id: "plant-5", name: "bush", x: 40, y: 198, hit: { x: 6, y: 24, w: 12, h: 8 } },
 ];
 
 k.setBackground(18, 14, 22);
@@ -59,6 +59,7 @@ k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
 k.loadSprite("window", "/assets/window.png?v=19", { singular: true });
+k.loadSprite("pool", "/assets/pool.png?v=8", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -788,9 +789,16 @@ k.scene("room", () => {
   );
 
   addSolid("record-player", 174, 108, { x: 2, y: 19, w: 20, h: 8 }, "唱片機輕輕轉了一下，發出沙沙聲。", null, 1.4);
+  addSolid(
+    "pool",
+    106,
+    164,
+    { x: 8, y: 22, w: 118, h: 50 },
+    "黃色小鴨充氣水池，摸起來暖暖的。",
+  );
 
   const player = k.add([
-    k.pos(GAME_SIZE / 2, 148),
+    k.pos(84, 148),
     k.anchor("center"),
     k.area({
       shape: new k.Rect(k.vec2(gooseHitX(false), HIT_Y), HIT_W, HIT_H),

@@ -381,6 +381,220 @@ k.scene("room", () => {
     k.z(4),
   ]);
 
+  const IPOH_LAT = 4.5975;
+  const IPOH_LON = 101.0901;
+  let weatherKind = "cloudy";
+  let flashTimer = 2;
+
+  function weatherFromCode(code) {
+    const n = Number(code);
+    if (n === 0) {
+      return "clear";
+    }
+    if (n === 1 || n === 2) {
+      return "cloudy";
+    }
+    if ([51, 53, 56, 61, 66, 80].includes(n)) {
+      return "rain";
+    }
+    if ([55, 57, 63, 65, 67, 81, 82, 95, 96, 99].includes(n)) {
+      return "storm";
+    }
+    return "overcast";
+  }
+
+  function mixRgb(a, b, t) {
+    return [
+      Math.round(a[0] + (b[0] - a[0]) * t),
+      Math.round(a[1] + (b[1] - a[1]) * t),
+      Math.round(a[2] + (b[2] - a[2]) * t),
+    ];
+  }
+
+  function skyToneForWeather(hour, kind) {
+    const base = skyTone(hour);
+    if (kind === "clear") {
+      return base;
+    }
+    if (kind === "cloudy") {
+      return mixRgb(base, [176, 188, 200], 0.28);
+    }
+    if (kind === "overcast") {
+      return mixRgb(base, [148, 158, 170], 0.62);
+    }
+    if (kind === "rain") {
+      return mixRgb(base, [110, 128, 148], 0.68);
+    }
+    return mixRgb(base, [58, 68, 82], 0.78);
+  }
+
+  const cloudSpecs = [
+    { x: 4, y: 2, speed: 5.2, parts: [[0, 2, 11, 3], [2, 0, 8, 3]] },
+    { x: 22, y: 6, speed: 3.6, parts: [[0, 2, 14, 3], [3, 0, 9, 3], [8, 1, 8, 3]] },
+    { x: 38, y: 3, speed: 4.4, parts: [[0, 2, 10, 3], [2, 0, 7, 3]] },
+    { x: 10, y: 9, speed: 2.8, parts: [[0, 1, 16, 3], [4, 0, 10, 3]] },
+  ];
+  const cloudParts = cloudSpecs.map((spec) => ({
+    spec,
+    bits: spec.parts.map(([px, py, pw, ph]) =>
+      k.add([
+        k.rect(pw, ph),
+        k.pos(glass.x, glass.y),
+        k.color(244, 244, 248),
+        k.z(4.28),
+        k.opacity(0),
+      ]),
+    ),
+  }));
+
+  const rainDrops = Array.from({ length: 22 }, (_, i) => ({
+    x: (i * 7) % glass.w,
+    y: (i * 5) % glass.h,
+    len: i % 3 === 0 ? 3 : 2,
+    obj: k.add([
+      k.rect(1, 3),
+      k.pos(glass.x, glass.y),
+      k.color(180, 210, 230),
+      k.z(4.36),
+      k.opacity(0),
+    ]),
+  }));
+
+  const bolt = [
+    [24, 2, 3, 4],
+    [22, 6, 3, 3],
+    [20, 9, 3, 4],
+    [18, 13, 4, 3],
+  ].map(([bx, by, bw, bh]) =>
+    k.add([
+      k.rect(bw, bh),
+      k.pos(glass.x + bx, glass.y + by),
+      k.color(255, 230, 90),
+      k.z(4.42),
+      k.opacity(0),
+    ]),
+  );
+
+  const flash = k.add([
+    k.rect(glass.w, glass.h),
+    k.pos(glass.x, glass.y),
+    k.color(255, 252, 230),
+    k.z(4.44),
+    k.opacity(0),
+  ]);
+
+  function paintClouds(kind, night) {
+    const show = kind === "cloudy" || kind === "overcast" || kind === "rain" || kind === "storm";
+    const tint = night
+      ? kind === "storm"
+        ? [70, 78, 92]
+        : [120, 128, 148]
+      : kind === "storm"
+        ? [108, 116, 128]
+        : kind === "overcast" || kind === "rain"
+          ? [210, 216, 224]
+          : [248, 248, 252];
+    const count = kind === "cloudy" ? 2 : show ? 4 : 0;
+    cloudParts.forEach((cloud, index) => {
+      for (const bit of cloud.bits) {
+        bit.color = k.rgb(tint[0], tint[1], tint[2]);
+        bit.opacity = index < count ? 1 : 0;
+      }
+    });
+  }
+
+  function stepWeather(dt) {
+    const { hour } = ipohParts();
+    const night = hour < 6 || hour >= 19;
+    const storm = weatherKind === "storm";
+    const cloudCount = weatherKind === "clear" ? 0 : weatherKind === "cloudy" ? 2 : 4;
+
+    cloudParts.forEach((cloud, index) => {
+      if (index >= cloudCount) {
+        for (const bit of cloud.bits) {
+          bit.opacity = 0;
+        }
+        return;
+      }
+      cloud.spec.x += cloud.spec.speed * dt;
+      if (cloud.spec.x > glass.w + 6) {
+        cloud.spec.x = -18;
+      }
+      cloud.spec.parts.forEach((part, p) => {
+        const bit = cloud.bits[p];
+        const lx = cloud.spec.x + part[0];
+        const ly = cloud.spec.y + part[1];
+        const visible = lx < glass.w && lx + part[2] > 0 && ly >= 0 && ly + part[3] <= glass.h;
+        bit.opacity = visible ? 1 : 0;
+        bit.pos = k.vec2(glass.x + lx, glass.y + ly);
+      });
+    });
+
+    const dropCount = storm ? 22 : weatherKind === "rain" ? 12 : 0;
+    const fall = storm ? 42 : 26;
+    const drift = storm ? 16 : 10;
+    rainDrops.forEach((drop, index) => {
+      if (index >= dropCount) {
+        drop.obj.opacity = 0;
+        return;
+      }
+      drop.x += drift * dt;
+      drop.y += fall * dt;
+      if (drop.y > glass.h) {
+        drop.y = -drop.len;
+        drop.x = (drop.x + 11) % glass.w;
+      }
+      if (drop.x > glass.w) {
+        drop.x -= glass.w;
+      }
+      const visible = drop.y >= 0 && drop.y + drop.len <= glass.h;
+      drop.obj.opacity = visible ? (storm ? 0.95 : 0.8) : 0;
+      drop.obj.height = drop.len;
+      drop.obj.pos = k.vec2(Math.round(glass.x + drop.x), Math.round(glass.y + drop.y));
+      drop.obj.color = k.rgb(night ? 140 : 190, night ? 180 : 220, night ? 210 : 240);
+    });
+
+    if (storm) {
+      flashTimer -= dt;
+      if (flashTimer <= 0) {
+        flash.opacity = 0.72;
+        for (const bit of bolt) {
+          bit.opacity = 1;
+        }
+        flashTimer = 2.2 + Math.random() * 3.8;
+      } else {
+        flash.opacity = Math.max(0, flash.opacity - dt * 3.4);
+        if (flash.opacity < 0.08) {
+          for (const bit of bolt) {
+            bit.opacity = 0;
+          }
+        }
+      }
+    } else {
+      flash.opacity = 0;
+      for (const bit of bolt) {
+        bit.opacity = 0;
+      }
+    }
+
+  }
+
+  async function fetchIpohWeather() {
+    try {
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${IPOH_LAT}&longitude=${IPOH_LON}&current=weather_code&timezone=Asia%2FKuala_Lumpur`,
+      );
+      const json = await res.json();
+      const next = weatherFromCode(json?.current?.weather_code);
+      if (next !== weatherKind) {
+        weatherKind = next;
+        updateSky();
+      }
+    } catch {
+      /* keep last weather */
+    }
+  }
+
   const starDots = [
     [5, 3],
     [11, 10],
@@ -450,7 +664,7 @@ k.scene("room", () => {
 
   function updateSky() {
     const { hour } = ipohParts();
-    const tone = skyTone(hour);
+    const tone = skyToneForWeather(hour, weatherKind);
     skyPane.color = k.rgb(tone[0], tone[1], tone[2]);
     const day = hour >= 6 && hour < 18;
     const night = hour < 6 || hour >= 19;
@@ -460,10 +674,11 @@ k.scene("room", () => {
     const yHigh = glass.y + RADIUS + 1;
     const cy = Math.round(yLow - Math.sin(t * Math.PI) * (yLow - yHigh));
     const visible = bodyInGlass(cx, cy);
+    const bodyOk = weatherKind === "clear" || weatherKind === "cloudy";
     sun.pos = k.vec2(cx, cy);
     moon.pos = k.vec2(cx, cy);
-    sun.hidden = !(day && visible);
-    moon.hidden = !(!day && visible);
+    sun.hidden = !(day && visible && bodyOk);
+    moon.hidden = !(!day && visible && bodyOk);
 
     const phase = moonPhaseFrac();
     for (const cell of moonDots) {
@@ -474,12 +689,19 @@ k.scene("room", () => {
       }
     }
 
+    const showStars = night && (weatherKind === "clear" || weatherKind === "cloudy");
     for (const star of starDots) {
-      star.opacity = night ? 1 : 0;
+      star.opacity = showStars ? 1 : 0;
     }
+    paintClouds(weatherKind, night);
   }
 
   updateSky();
+  void fetchIpohWeather();
+  setInterval(() => {
+    void fetchIpohWeather();
+  }, 10 * 60 * 1000);
+
   let lastHour = ipohParts().hour;
   k.onUpdate(() => {
     const hour = ipohParts().hour;
@@ -487,6 +709,8 @@ k.scene("room", () => {
       lastHour = hour;
       updateSky();
     }
+    const dt = typeof k.dt === "function" ? k.dt() : 1 / 60;
+    stepWeather(Math.min(dt || 1 / 60, 0.05));
   });
 
   addSolid("cabinet", 18, 16, { x: 4, y: 48, w: 40, h: 14 }, "衣櫃裡疊著換季的衣服。");

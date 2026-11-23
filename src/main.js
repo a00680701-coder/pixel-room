@@ -58,7 +58,7 @@ k.loadSprite("cabinet", "/assets/cabinet.png?v=4", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=11", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=12", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });

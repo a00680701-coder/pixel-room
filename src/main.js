@@ -58,7 +58,7 @@ k.loadSprite("cabinet", "/assets/cabinet.png?v=4", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=5", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=6", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -372,7 +372,7 @@ k.scene("room", () => {
     h: WIN_H - 4,
   };
 
-  k.add([k.sprite("window"), k.pos(WIN_X, WIN_Y), k.z(3)]);
+  k.add([k.sprite("window"), k.pos(WIN_X, WIN_Y), k.z(5)]);
 
   const skyPane = k.add([
     k.rect(glass.w, glass.h),
@@ -384,7 +384,7 @@ k.scene("room", () => {
   const IPOH_LAT = 4.5975;
   const IPOH_LON = 101.0901;
   let weatherKind = "cloudy";
-  let flashTimer = 2;
+  let flashTimer = 10;
 
   function weatherFromCode(code) {
     const n = Number(code);
@@ -429,10 +429,10 @@ k.scene("room", () => {
   }
 
   const cloudSpecs = [
-    { x: 4, y: 2, speed: 5.2, parts: [[0, 2, 11, 3], [2, 0, 8, 3]] },
-    { x: 22, y: 6, speed: 3.6, parts: [[0, 2, 14, 3], [3, 0, 9, 3], [8, 1, 8, 3]] },
-    { x: 38, y: 3, speed: 4.4, parts: [[0, 2, 10, 3], [2, 0, 7, 3]] },
-    { x: 10, y: 9, speed: 2.8, parts: [[0, 1, 16, 3], [4, 0, 10, 3]] },
+    { x: 4, y: 2, speed: 1.15, parts: [[0, 2, 11, 3], [2, 0, 8, 3]] },
+    { x: 22, y: 6, speed: 0.8, parts: [[0, 2, 14, 3], [3, 0, 9, 3], [8, 1, 8, 3]] },
+    { x: 38, y: 3, speed: 1.0, parts: [[0, 2, 10, 3], [2, 0, 7, 3]] },
+    { x: 10, y: 9, speed: 0.62, parts: [[0, 1, 16, 3], [4, 0, 10, 3]] },
   ];
   const cloudParts = cloudSpecs.map((spec) => ({
     spec,
@@ -517,35 +517,31 @@ k.scene("room", () => {
         return;
       }
       cloud.spec.x += cloud.spec.speed * dt;
-      if (cloud.spec.x > glass.w + 6) {
-        cloud.spec.x = -18;
+      const cloudW = Math.max(...cloud.spec.parts.map((part) => part[0] + part[2]));
+      if (cloud.spec.x > glass.w) {
+        cloud.spec.x = -cloudW;
       }
       cloud.spec.parts.forEach((part, p) => {
         const bit = cloud.bits[p];
-        const lx = cloud.spec.x + part[0];
-        const ly = cloud.spec.y + part[1];
-        const visible = lx < glass.w && lx + part[2] > 0 && ly >= 0 && ly + part[3] <= glass.h;
-        bit.opacity = visible ? 1 : 0;
+        const lx = Math.round(cloud.spec.x + part[0]);
+        const ly = Math.round(cloud.spec.y + part[1]);
+        const inside =
+          lx >= 0 && ly >= 0 && lx + part[2] <= glass.w && ly + part[3] <= glass.h;
+        bit.opacity = inside ? 1 : 0;
         bit.pos = k.vec2(glass.x + lx, glass.y + ly);
       });
     });
 
     const dropCount = storm ? 22 : weatherKind === "rain" ? 12 : 0;
-    const fall = storm ? 42 : 26;
-    const drift = storm ? 16 : 10;
+    const fall = storm ? 36 : 22;
     rainDrops.forEach((drop, index) => {
       if (index >= dropCount) {
         drop.obj.opacity = 0;
         return;
       }
-      drop.x += drift * dt;
       drop.y += fall * dt;
       if (drop.y > glass.h) {
         drop.y = -drop.len;
-        drop.x = (drop.x + 11) % glass.w;
-      }
-      if (drop.x > glass.w) {
-        drop.x -= glass.w;
       }
       const visible = drop.y >= 0 && drop.y + drop.len <= glass.h;
       drop.obj.opacity = visible ? (storm ? 0.95 : 0.8) : 0;
@@ -561,7 +557,7 @@ k.scene("room", () => {
         for (const bit of bolt) {
           bit.opacity = 1;
         }
-        flashTimer = 2.2 + Math.random() * 3.8;
+        flashTimer = 8 + Math.random() * 12;
       } else {
         flash.opacity = Math.max(0, flash.opacity - dt * 3.4);
         if (flash.opacity < 0.08) {

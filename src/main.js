@@ -58,7 +58,7 @@ k.loadSprite("cabinet", "/assets/cabinet.png?v=4", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=12", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=19", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -410,9 +410,9 @@ k.scene("room", () => {
   addBlock(0, GAME_SIZE - TILE, GAME_SIZE, TILE);
 
   const WIN_W = 56;
-  const WIN_H = 15;
+  const WIN_H = 19;
   const WIN_X = Math.round((GAME_SIZE - WIN_W) / 2);
-  const WIN_Y = 9;
+  const WIN_Y = 7;
   const WIN_FRAME = 2;
   const RADIUS = 4;
   const glass = {

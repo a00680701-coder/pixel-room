@@ -596,7 +596,15 @@ function syncTitleInput() {
   title.classList.toggle("is-placeholder", !custom);
 }
 
-function renderSpread() {
+function isComposingField(el) {
+  return Boolean(el && (el.dataset.composing === "1" || el.isComposing));
+}
+
+function shouldFreezeField(el, force = false) {
+  return Boolean(!force && el && document.activeElement === el);
+}
+
+function renderSpread(forceFields = false) {
   const { left, right, title, leftDate, leftNum, rightNum, prev, next, book } = els();
   if (!left || !right) {
     return;
@@ -606,8 +614,14 @@ function renderSpread() {
   els().bookmark?.classList.toggle("is-on", tocOpen);
 
   const { left: leftPage, right: rightPage } = spreadRange(content, spreadIndex);
-  left.value = leftPage ? content.slice(leftPage.start, leftPage.end) : "";
-  right.value = rightPage ? content.slice(rightPage.start, rightPage.end) : "";
+  const nextLeft = leftPage ? content.slice(leftPage.start, leftPage.end) : "";
+  const nextRight = rightPage ? content.slice(rightPage.start, rightPage.end) : "";
+  if (!shouldFreezeField(left, forceFields)) {
+    left.value = nextLeft;
+  }
+  if (!shouldFreezeField(right, forceFields)) {
+    right.value = nextRight;
+  }
   if (leftDate) {
     leftDate.textContent = tocOpen ? "" : formatHead(editingDate || todayIso());
   }
@@ -819,6 +833,10 @@ function openToc() {
 
 function applyEdit(side) {
   const { left, right } = els();
+  const field = side === "left" ? left : right;
+  if (!left || !right || isComposingField(field)) {
+    return;
+  }
   const caret = side === "left" ? left.selectionStart : right.selectionStart;
   const { start, end } = spreadRange(content, spreadIndex);
   const hadLater = content.slice(end).length > 0;
@@ -833,15 +851,28 @@ function applyEdit(side) {
     }
   }
 
+  const assembled = content.slice(0, start) + left.value + right.value + content.slice(end);
+  const capped = next !== assembled;
   content = next;
   const entry = cachedEntries.find((item) => item.id && item.id === editingId);
   if (entry) {
     entry.content = content;
     entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
   }
-  renderSpread();
+  renderSpread(capped);
 
   if (tocOpen) {
+    scheduleSave();
+    return;
+  }
+
+  if (document.activeElement === field) {
+    const newLeft = left.value.length;
+    if (side === "left" && caret > newLeft) {
+      const pos = Math.min(Math.max(0, caret - newLeft), right.value.length);
+      right.focus();
+      right.setSelectionRange(pos, pos);
+    }
     scheduleSave();
     return;
   }
@@ -1076,10 +1107,39 @@ export function initDiary() {
   void syncPencilsFromCloud();
 
   const { left, right, title } = els();
-  left?.addEventListener("input", () => applyEdit("left"));
-  right?.addEventListener("input", () => applyEdit("right"));
+
+  function bindIme(el, onCommit) {
+    if (!el) {
+      return;
+    }
+    el.addEventListener("compositionstart", () => {
+      el.dataset.composing = "1";
+    });
+    el.addEventListener("compositionend", () => {
+      delete el.dataset.composing;
+      onCommit();
+    });
+    el.addEventListener("input", (event) => {
+      if (event.isComposing || el.dataset.composing === "1") {
+        return;
+      }
+      onCommit();
+    });
+  }
+
+  bindIme(left, () => applyEdit("left"));
+  bindIme(right, () => applyEdit("right"));
+  bindIme(title, () => {
+    editingTitle = title.value;
+    title.classList.toggle("is-placeholder", !isCustomTitle(editingTitle, content));
+    const entry = cachedEntries.find((item) => item.id && item.id === editingId);
+    if (entry) {
+      entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
+    }
+    scheduleSave();
+  });
   title?.addEventListener("keydown", (event) => {
-    if (tocOpen || event.isComposing) {
+    if (tocOpen || event.isComposing || title.dataset.composing === "1") {
       return;
     }
     if (event.key === "Enter") {
@@ -1097,15 +1157,6 @@ export function initDiary() {
       title.classList.remove("is-placeholder");
       requestAnimationFrame(() => title.select());
     }
-  });
-  title?.addEventListener("input", () => {
-    editingTitle = title.value;
-    title.classList.toggle("is-placeholder", !isCustomTitle(editingTitle, content));
-    const entry = cachedEntries.find((item) => item.id && item.id === editingId);
-    if (entry) {
-      entry.title = isCustomTitle(editingTitle) ? editingTitle.trim() : "";
-    }
-    scheduleSave();
   });
   title?.addEventListener("blur", () => {
     editingTitle = isCustomTitle(title.value) ? title.value.trim() : "";
@@ -1217,6 +1268,9 @@ export function initDiary() {
 
   window.addEventListener("keydown", (event) => {
     if (!paused) {
+      return;
+    }
+    if (event.isComposing || event.target?.dataset?.composing === "1") {
       return;
     }
     if (event.code === "Escape") {

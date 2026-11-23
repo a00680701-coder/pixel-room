@@ -535,6 +535,7 @@ k.scene("room", () => {
   let facing = "down";
   let carrying = null;
   let plantSaveTimer = 0;
+  let lastInteractAt = 0;
 
   function setCarriedCollision(enabled) {
     if (!carrying) {
@@ -573,6 +574,7 @@ k.scene("room", () => {
     }
     carrying = plant;
     setCarriedCollision(false);
+    player.vel = k.vec2(0, 0);
     followCarriedPlant();
     showToast("拿著盆栽。走到空地再點一下放下。");
   }
@@ -601,6 +603,11 @@ k.scene("room", () => {
     if (isGamePaused()) {
       return;
     }
+    const now = performance.now();
+    if (now - lastInteractAt < 220) {
+      return;
+    }
+    lastInteractAt = now;
     const hitX = gooseHitX(goose.flipX);
     const target = nearestInteract(player, hitX, carrying);
 
@@ -693,10 +700,9 @@ k.scene("room", () => {
       moveHit.h,
     );
 
+    player.vel = k.vec2(0, 0);
     if (moving) {
       player.move(dir.unit().scale(SPEED));
-    } else {
-      player.vel = k.vec2(0, 0);
     }
 
     const minX = TILE - moveHit.x;

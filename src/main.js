@@ -58,7 +58,7 @@ k.loadSprite("cabinet", "/assets/cabinet.png?v=4", { singular: true });
 k.loadSprite("bookcase", "/assets/bookcase.png?v=7", { singular: true });
 k.loadSprite("bush", "/assets/bush.png?v=3", { singular: true });
 k.loadSprite("palm", "/assets/palm.png?v=3", { singular: true });
-k.loadSprite("window", "/assets/window.png?v=6", { singular: true });
+k.loadSprite("window", "/assets/window.png?v=11", { singular: true });
 k.loadSprite("floor", "/assets/floor.png", { singular: true });
 k.loadSprite("wall-n", "/assets/wall-n.png", { singular: true });
 k.loadSprite("wall-n-l", "/assets/wall-n-l.png", { singular: true });
@@ -80,13 +80,14 @@ function gooseHitX(facingRight) {
 }
 
 function addBlock(x, y, w, h) {
-  k.add([
+  const wall = k.add([
     k.pos(x, y),
     k.area({ shape: new k.Rect(k.vec2(0, 0), w, h) }),
     k.body({ isStatic: true }),
     k.z(-1),
     "wall",
   ]);
+  wall.hit = { x: 0, y: 0, w, h };
 }
 
 function ipohParts() {
@@ -205,6 +206,54 @@ function playerMoveHit(hitX, carrying, facing) {
     return gooseHit;
   }
   return unionHit(gooseHit, carriedPlantHit(carrying, facing));
+}
+
+function aabbOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function solidWorldHit(obj) {
+  if (obj.hit) {
+    const sx = Number(obj.scale?.x ?? 1);
+    const sy = Number(obj.scale?.y ?? 1);
+    return {
+      x: obj.pos.x + obj.hit.x * sx,
+      y: obj.pos.y + obj.hit.y * sy,
+      w: obj.hit.w * sx,
+      h: obj.hit.h * sy,
+    };
+  }
+  const shape = obj.area?.shape;
+  const ox = shape?.pos?.x ?? 0;
+  const oy = shape?.pos?.y ?? 0;
+  const w = shape?.width ?? 0;
+  const h = shape?.height ?? 0;
+  return { x: obj.pos.x + ox, y: obj.pos.y + oy, w, h };
+}
+
+function carryBlocked(player, hitX, carrying, facing) {
+  if (!carrying) {
+    return false;
+  }
+  const rel = playerMoveHit(hitX, carrying, facing);
+  const box = {
+    x: player.pos.x + rel.x,
+    y: player.pos.y + rel.y,
+    w: rel.w,
+    h: rel.h,
+  };
+  for (const tag of ["solid", "wall"]) {
+    for (const obj of k.get(tag)) {
+      if (obj === player || obj === carrying || obj.carried) {
+        continue;
+      }
+      const other = solidWorldHit(obj);
+      if (other.w > 0 && other.h > 0 && aabbOverlap(box, other)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function snapshotPlants(plants) {
@@ -361,15 +410,16 @@ k.scene("room", () => {
   addBlock(0, GAME_SIZE - TILE, GAME_SIZE, TILE);
 
   const WIN_W = 56;
-  const WIN_H = 22;
+  const WIN_H = 15;
   const WIN_X = Math.round((GAME_SIZE - WIN_W) / 2);
-  const WIN_Y = 8;
+  const WIN_Y = 9;
+  const WIN_FRAME = 2;
   const RADIUS = 4;
   const glass = {
-    x: WIN_X + 2,
-    y: WIN_Y + 2,
-    w: WIN_W - 4,
-    h: WIN_H - 4,
+    x: WIN_X + WIN_FRAME,
+    y: WIN_Y + WIN_FRAME,
+    w: WIN_W - WIN_FRAME * 2,
+    h: WIN_H - WIN_FRAME * 2,
   };
 
   k.add([k.sprite("window"), k.pos(WIN_X, WIN_Y), k.z(5)]);
@@ -420,19 +470,21 @@ k.scene("room", () => {
       return mixRgb(base, [176, 188, 200], 0.28);
     }
     if (kind === "overcast") {
-      return mixRgb(base, [148, 158, 170], 0.62);
+      const day = hour >= 6 && hour < 18;
+      return mixRgb(base, day ? [236, 240, 244] : [148, 158, 170], day ? 0.42 : 0.62);
     }
     if (kind === "rain") {
-      return mixRgb(base, [110, 128, 148], 0.68);
+      const day = hour >= 6 && hour < 18;
+      return mixRgb(base, day ? [214, 224, 232] : [110, 128, 148], day ? 0.34 : 0.68);
     }
     return mixRgb(base, [58, 68, 82], 0.78);
   }
 
   const cloudSpecs = [
-    { x: 4, y: 2, speed: 1.15, parts: [[0, 2, 11, 3], [2, 0, 8, 3]] },
-    { x: 22, y: 6, speed: 0.8, parts: [[0, 2, 14, 3], [3, 0, 9, 3], [8, 1, 8, 3]] },
-    { x: 38, y: 3, speed: 1.0, parts: [[0, 2, 10, 3], [2, 0, 7, 3]] },
-    { x: 10, y: 9, speed: 0.62, parts: [[0, 1, 16, 3], [4, 0, 10, 3]] },
+    { x: 4, y: 1, speed: 0.42, parts: [[0, 2, 11, 3], [2, 0, 8, 3]] },
+    { x: 22, y: 4, speed: 0.28, parts: [[0, 2, 14, 3], [3, 0, 9, 3], [8, 1, 8, 3]] },
+    { x: 38, y: 2, speed: 0.36, parts: [[0, 2, 10, 3], [2, 0, 7, 3]] },
+    { x: 10, y: 6, speed: 0.22, parts: [[0, 1, 16, 3], [4, 0, 10, 3]] },
   ];
   const cloudParts = cloudSpecs.map((spec) => ({
     spec,
@@ -450,6 +502,7 @@ k.scene("room", () => {
   const rainDrops = Array.from({ length: 22 }, (_, i) => ({
     x: (i * 7) % glass.w,
     y: (i * 5) % glass.h,
+    homeX: (i * 7) % glass.w,
     len: i % 3 === 0 ? 3 : 2,
     obj: k.add([
       k.rect(1, 3),
@@ -461,10 +514,10 @@ k.scene("room", () => {
   }));
 
   const bolt = [
-    [24, 2, 3, 4],
-    [22, 6, 3, 3],
-    [20, 9, 3, 4],
-    [18, 13, 4, 3],
+    [24, 1, 3, 2],
+    [22, 3, 3, 2],
+    [20, 5, 3, 2],
+    [18, 7, 4, 2],
   ].map(([bx, by, bw, bh]) =>
     k.add([
       k.rect(bw, bh),
@@ -491,9 +544,11 @@ k.scene("room", () => {
         : [120, 128, 148]
       : kind === "storm"
         ? [108, 116, 128]
-        : kind === "overcast" || kind === "rain"
-          ? [210, 216, 224]
-          : [248, 248, 252];
+        : kind === "overcast"
+          ? [232, 236, 242]
+          : kind === "rain"
+            ? [210, 216, 224]
+            : [248, 248, 252];
     const count = kind === "cloudy" ? 2 : show ? 4 : 0;
     cloudParts.forEach((cloud, index) => {
       for (const bit of cloud.bits) {
@@ -539,6 +594,7 @@ k.scene("room", () => {
         drop.obj.opacity = 0;
         return;
       }
+      drop.x = drop.homeX;
       drop.y += fall * dt;
       if (drop.y > glass.h) {
         drop.y = -drop.len;
@@ -592,16 +648,16 @@ k.scene("room", () => {
   }
 
   const starDots = [
-    [5, 3],
-    [11, 10],
-    [18, 5],
-    [24, 13],
-    [31, 4],
-    [38, 9],
-    [44, 14],
-    [8, 15],
-    [47, 6],
-    [27, 2],
+    [5, 2],
+    [11, 6],
+    [18, 3],
+    [24, 8],
+    [31, 2],
+    [38, 5],
+    [44, 9],
+    [8, 7],
+    [47, 4],
+    [27, 1],
   ].map(([sx, sy], i) =>
     k.add([
       k.rect(1, 1),
@@ -763,16 +819,31 @@ k.scene("room", () => {
     }
     if (enabled) {
       carrying.carried = false;
-      carrying.area.enabled = true;
+      if (!carrying.area) {
+        carrying.use(
+          k.area({
+            shape: new k.Rect(
+              k.vec2(carrying.hit.x, carrying.hit.y),
+              carrying.hit.w,
+              carrying.hit.h,
+            ),
+          }),
+        );
+      } else {
+        carrying.area.enabled = true;
+      }
       if (!carrying.body) {
         carrying.use(k.body({ isStatic: true }));
       }
       return;
     }
     carrying.carried = true;
-    carrying.area.enabled = false;
     if (carrying.body) {
       carrying.unuse("body");
+    }
+    if (carrying.area) {
+      carrying.area.enabled = false;
+      carrying.unuse("area");
     }
   }
 
@@ -794,6 +865,9 @@ k.scene("room", () => {
     }
     carrying = plant;
     setCarriedCollision(false);
+    if (player.body) {
+      player.unuse("body");
+    }
     player.vel = k.vec2(0, 0);
     followCarriedPlant();
     showToast("拿著盆栽。走到空地再點一下放下。");
@@ -807,10 +881,23 @@ k.scene("room", () => {
     followCarriedPlant();
     carrying = null;
     plant.carried = false;
-    plant.area.enabled = true;
+    if (!plant.area) {
+      plant.use(
+        k.area({
+          shape: new k.Rect(k.vec2(plant.hit.x, plant.hit.y), plant.hit.w, plant.hit.h),
+        }),
+      );
+    } else {
+      plant.area.enabled = true;
+    }
     if (!plant.body) {
       plant.use(k.body({ isStatic: true }));
     }
+    if (!player.body) {
+      player.use(k.body());
+      player.gravityScale = 0;
+    }
+    player.vel = k.vec2(0, 0);
     plant.z = plant.pos.y + plant.hit.y + plant.hit.h;
     showToast("放下盆栽。");
     clearTimeout(plantSaveTimer);
@@ -900,6 +987,7 @@ k.scene("room", () => {
     if (k.isKeyDown("down") || k.isKeyDown("s") || touchInput.down) dir.y += 1;
 
     const moving = dir.x !== 0 || dir.y !== 0;
+    const prevFacing = facing;
 
     if (moving) {
       if (Math.abs(dir.x) > Math.abs(dir.y)) {
@@ -912,19 +1000,35 @@ k.scene("room", () => {
     if (facing === "left") goose.flipX = false;
     if (facing === "right") goose.flipX = true;
 
-    const hitX = gooseHitX(goose.flipX);
-    const moveHit = playerMoveHit(hitX, carrying, facing);
-    player.area.shape = new k.Rect(
-      k.vec2(moveHit.x, moveHit.y),
-      moveHit.w,
-      moveHit.h,
-    );
-
+    let hitX = gooseHitX(goose.flipX);
+    const gooseHit = { x: hitX, y: HIT_Y, w: HIT_W, h: HIT_H };
+    player.area.shape = new k.Rect(k.vec2(gooseHit.x, gooseHit.y), gooseHit.w, gooseHit.h);
     player.vel = k.vec2(0, 0);
-    if (moving) {
-      player.move(dir.unit().scale(SPEED));
+
+    if (carrying && carryBlocked(player, hitX, carrying, facing)) {
+      facing = prevFacing;
+      if (facing === "left") goose.flipX = false;
+      if (facing === "right") goose.flipX = true;
+      hitX = gooseHitX(goose.flipX);
+      gooseHit.x = hitX;
+      player.area.shape = new k.Rect(k.vec2(gooseHit.x, gooseHit.y), gooseHit.w, gooseHit.h);
     }
 
+    const prevX = player.pos.x;
+    const prevY = player.pos.y;
+    if (moving) {
+      if (carrying) {
+        const dt = typeof k.dt === "function" ? k.dt() : k.dt;
+        const step = dir.unit().scale(SPEED * dt);
+        player.pos.x += step.x;
+        player.pos.y += step.y;
+      } else {
+        player.move(dir.unit().scale(SPEED));
+      }
+    }
+    player.vel = k.vec2(0, 0);
+
+    const moveHit = playerMoveHit(hitX, carrying, facing);
     const minX = TILE - moveHit.x;
     const maxX = GAME_SIZE - TILE - (moveHit.x + moveHit.w);
     const minY = TILE * 2 - moveHit.y;
@@ -932,6 +1036,21 @@ k.scene("room", () => {
 
     player.pos.x = Math.round(k.clamp(player.pos.x, minX, maxX));
     player.pos.y = Math.round(k.clamp(player.pos.y, minY, maxY));
+
+    if (carrying) {
+      const nx = player.pos.x;
+      const ny = player.pos.y;
+      player.pos.x = prevX;
+      player.pos.y = ny;
+      if (carryBlocked(player, hitX, carrying, facing)) {
+        player.pos.y = prevY;
+      }
+      player.pos.x = nx;
+      if (carryBlocked(player, hitX, carrying, facing)) {
+        player.pos.x = prevX;
+      }
+      player.vel = k.vec2(0, 0);
+    }
 
     goose.pos.y = -4 + (moving ? Math.round(Math.sin(k.time() * 14)) : 0);
     player.z = player.pos.y + HIT_Y + HIT_H;
